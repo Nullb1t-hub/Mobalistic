@@ -1,4 +1,5 @@
 {
   "schema_version": 1,
+  "instructions": "Only add builds verified against the current game patch. Include source_url, verified_at (YYYY-MM-DD), patch_version, hero, six ordered items with name and direct image_url, and set verified=true only after human/source verification.",
   "builds": []
 }
