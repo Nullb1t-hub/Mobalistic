@@ -1,0 +1,33 @@
+{
+  "brand": {
+    "name": "MOBALISTIC",
+    "tagline": "ИГРАЙ УМНЕЕ",
+    "accent": "#A78BFA",
+    "background": "#0B0D16",
+    "panel": "#171A2B"
+  },
+  "searches": [
+    {"category": "news", "query": "\"Mobile Legends Bang Bang\" patch update"},
+    {"category": "esports", "query": "\"Mobile Legends\" MPL tournament esports"},
+    {"category": "guides", "query": "\"Mobile Legends\" guide tips gameplay"},
+    {"category": "builds", "query": "\"Mobile Legends\" hero build meta"}
+  ],
+  "trusted_publishers": [
+    "mobile legends: bang bang",
+    "mobile legends",
+    "one esports",
+    "esports.gg",
+    "liquipedia",
+    "afkgaming",
+    "gosugamers",
+    "the esports observer",
+    "moonton"
+  ],
+  "category_weights": {
+    "builds": 50,
+    "guides": 20,
+    "news": 15,
+    "memes": 10,
+    "hot_topic": 5
+  }
+}
