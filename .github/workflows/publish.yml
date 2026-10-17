@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: mobalistic-publisher
+  group: mobalistic-publisher-v2
   cancel-in-progress: true
 
 jobs:
