@@ -68,6 +68,36 @@ class MobalisticCoreTests(unittest.TestCase):
         self.assertEqual(kwargs["data"]["parse_mode"], "HTML")
 
 
+
+    def test_build_caption_is_clean_russian_and_keeps_item_order(self):
+        build = {
+            "hero": "Argus",
+            "patch_version": "2.2.16a",
+            "source_url": "https://example.com/argus",
+            "context": "English source context must not leak into the Telegram caption",
+            "items": [{"name": name, "image_url": "https://example.com/icon.png"} for name in [
+                "Swift Boots", "Corrosion Scythe", "Demon Hunter Sword",
+                "Golden Staff", "Haas's Claws", "Malefic Roar"
+            ]],
+            "emblem_name": "Marksman Emblem",
+            "battle_spell_names": "Flicker",
+        }
+        caption = agent.build_caption(build)
+        self.assertIn("Версия игры:", caption)
+        self.assertIn("Предметы по порядку", caption)
+        self.assertLess(caption.index("1. Swift Boots"), caption.index("2. Corrosion Scythe"))
+        self.assertLess(caption.index("5. Haas's Claws"), caption.index("6. Malefic Roar"))
+        self.assertNotIn("English source context", caption)
+        self.assertIn("подстраивай предметы под состав соперника", caption)
+        self.assertLessEqual(len(caption), 1024)
+
+    def test_build_discovery_runs_even_when_registry_has_unposted_builds(self):
+        source = agent.main.__code__
+        import inspect
+        code = inspect.getsource(agent.main)
+        self.assertIn("api_build = discover_one_source_build(state)", code)
+        self.assertNotIn("discover_one_source_build(state) if not builds", code)
+
     def test_publication_is_capped_at_one_per_run(self):
         self.assertEqual(agent.MAX_POSTS_PER_RUN, 1)
 
