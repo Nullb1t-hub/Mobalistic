@@ -52,10 +52,10 @@
     "mlbb.io"
   ],
   "category_weights": {
-    "builds": 45,
-    "guides": 25,
-    "news": 15,
-    "esports": 10,
-    "hot_topic": 5
+    "builds": 70,
+    "guides": 15,
+    "news": 8,
+    "esports": 5,
+    "hot_topic": 2
   }
 }
