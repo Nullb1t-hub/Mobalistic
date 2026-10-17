@@ -903,6 +903,12 @@ def main() -> int:
                     cfg, "Аргус", selected_candidate.image_url, "Сборка #1 / комьюнити-статистика",
                     "Marksman · 21/43", "War Cry · 27/43", "Inspire · 49%",
                 )
+                if image_path is None:
+                    # Fallback to the original build page's own artwork, never a generated placeholder.
+                    image_path = create_hero_build_poster(
+                        cfg, "Аргус", SEED_SOURCE_URL, "Сборка #1 / комьюнити-статистика",
+                        "Marksman · 21/43", "War Cry · 27/43", "Inspire · 49%",
+                    )
             else:
                 image_path = create_editorial_card(
                     cfg, category, image_title, selected_candidate.publisher,
