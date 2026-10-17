@@ -64,5 +64,14 @@ class MobalisticCoreTests(unittest.TestCase):
             )
         self.assertIsNone(result)
 
+
+    def test_google_news_artwork_is_rejected(self):
+        response = Mock()
+        response.url = "https://news.google.com/rss/articles/example"
+        response.headers = {"Content-Type": "text/html"}
+        response.raise_for_status.return_value = None
+        with patch("src.mobalistic.requests.get", return_value=response):
+            self.assertIsNone(agent.article_image("https://news.google.com/rss/articles/example"))
+
 if __name__ == "__main__":
     unittest.main()
