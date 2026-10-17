@@ -34,6 +34,8 @@ PUBLISH_ENABLED = os.getenv("PUBLISH_ENABLED", "false").lower() == "true"
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
+HF_IMAGE_MODEL = os.getenv("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 MAX_POSTS_PER_RUN = 1  # Hard cap: never publish a burst.
 MAX_AGE_DAYS = max(1, min(14, int(os.getenv("MAX_AGE_DAYS", "7"))))
@@ -192,6 +194,48 @@ def gemini_text(prompt: str) -> str:
         raise RuntimeError("Gemini returned an empty response")
     return answer
 
+def generate_ai_artwork(prompt: str) -> Image.Image | None:
+    """Try a free-tier Hugging Face image inference endpoint; never break publishing if unavailable."""
+    if not HF_TOKEN:
+        return None
+    endpoint = "https://router.huggingface.co/hf-inference/models/" + HF_IMAGE_MODEL
+    try:
+        response = requests.post(
+            endpoint,
+            headers={"Authorization": f"Bearer {HF_TOKEN}", "Accept": "image/*"},
+            json={"inputs": prompt},
+            timeout=90,
+        )
+        response.raise_for_status()
+        content_type = response.headers.get("Content-Type", "").lower()
+        if not content_type.startswith("image/") or not response.content:
+            log.warning("AI image endpoint returned a non-image response; using verified artwork instead")
+            return None
+        from io import BytesIO
+        image = Image.open(BytesIO(response.content)).convert("RGB")
+        if image.width < 512 or image.height < 512:
+            log.warning("AI image endpoint returned an unexpectedly small image")
+            return None
+        log.info("AI artwork generated using Hugging Face model %s", HF_IMAGE_MODEL)
+        return image
+    except Exception as exc:
+        log.warning("AI image generation unavailable (free-tier quota/model may be limited): %s", exc)
+        return None
+
+
+def art_prompt(category: str, title: str, hero: str = "") -> str:
+    subject = f"Mobile Legends hero {hero}" if hero else f"Mobile Legends Bang Bang editorial topic: {title}"
+    return (
+        "Create premium esports key art for a Mobile Legends: Bang Bang community media channel. "
+        f"Main subject: {subject}. "
+        "Vertical 4:5 composition, cinematic AAA fantasy game art, powerful readable silhouette, "
+        "dramatic rim lighting, volumetric haze, detailed armor and materials, rich dark atmosphere, "
+        "electric violet and icy blue accents, high contrast, polished official-game-promo quality, "
+        "professional art direction, dynamic camera, clear focal point, subtle particles. "
+        "No words, no typography, no letters, no logos, no watermark, no UI, no collage, no poster layout."
+    )
+
+
 def make_caption(item: Candidate) -> str | None:
     prompt = f"""
 Ты — редактор живого русскоязычного Telegram-канала для игроков Mobile Legends: Bang Bang.
@@ -338,12 +382,15 @@ def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publis
     brand = cfg.get("brand", {})
     accent = brand.get("accent", "#A78BFA")
     base = brand.get("background", "#0B0D16")
-    artwork = article_image(image_url) if image_url else None
+    # AI-generated cinematic artwork is preferred; use real source art if free inference is unavailable.
+    artwork = generate_ai_artwork(art_prompt(category, title))
+    if artwork is None and image_url:
+        artwork = article_image(image_url)
     if artwork is None and source_url:
         artwork = article_image(source_url)
-    # No generic fake cover: skip stories without genuine publisher artwork.
+    # Never publish a generic template when neither AI art nor genuine source art is available.
     if artwork is None:
-        log.info("Skipping editorial item without genuine artwork: %s", title)
+        log.info("Skipping editorial item: neither AI nor genuine source artwork is available: %s", title)
         return None
     if artwork is not None:
         scale = max(width / artwork.width, height / artwork.height)
@@ -535,9 +582,12 @@ def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None
 def create_hero_build_poster(cfg: dict[str, Any], hero: str, hero_image_url: str, build_label: str,
                              emblem_text: str, talent_text: str, spell_text: str) -> Path | None:
     """Create a polished editorial meta card from real splash artwork; no AI image service needed."""
-    artwork = article_image(hero_image_url) if hero_image_url else None
+    # Ask the image model for original key art first; retain source artwork as fallback.
+    artwork = generate_ai_artwork(art_prompt("builds", f"{hero} hero build", hero))
+    if artwork is None and hero_image_url:
+        artwork = article_image(hero_image_url)
     if artwork is None:
-        log.warning("No genuine splash artwork available for %s; skip hero build poster", hero)
+        log.warning("No AI or genuine splash artwork available for %s; skip hero build poster", hero)
         return None
     width, height = 1080, 1350
     brand = cfg.get("brand", {})
