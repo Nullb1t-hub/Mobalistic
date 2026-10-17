@@ -884,9 +884,10 @@ def main() -> int:
         log.error("GEMINI_API_KEY is missing. Add it to GitHub Actions secrets before running the content engine.")
         return 2
 
-    # One-time exception: publish only the redesigned Argus card once for the user to review.
-    # Once its dedicated key is recorded after Telegram confirms delivery, the normal 4-hour cooldown applies.
-    force_seed_only = PUBLISH_ENABLED and SEED_POSTER_V3_KEY not in published
+    # One-time Layla post bypasses cooldown to verify AI artwork after token setup.
+    force_layla_only = PUBLISH_ENABLED and LAYLA_AI_TEST_KEY not in published
+    # Retain the older Argus review fallback only after the Layla test has been published.
+    force_seed_only = PUBLISH_ENABLED and not force_layla_only and SEED_POSTER_V3_KEY not in published
     last_post_raw = str(state.get("last_post_at", "")).strip()
     if PUBLISH_ENABLED and last_post_raw and not force_seed_only:
         try:
@@ -914,7 +915,13 @@ def main() -> int:
         ]
     candidates = collect_candidates(cfg, published)
     seed = curated_seed_candidate(published)
-    if force_seed_only:
+    layla_seed = curated_layla_candidate(published)
+    if force_layla_only:
+        # Strictly hold every other candidate so this run can only publish Layla.
+        candidates = [layla_seed] if layla_seed is not None else []
+        builds = []
+        log.info("One-time Layla AI-art review post enabled; all other sources are held.")
+    elif force_seed_only:
         # Strictly prevent any old/other article from being selected during this one-time bypass.
         candidates = [seed] if seed is not None else []
         builds = []
@@ -979,7 +986,12 @@ def main() -> int:
             # Use the AI-written Russian headline on the image, not the English RSS headline.
             image_title = re.sub(r"<[^>]+>", "", caption.splitlines()[0]).strip()[:110]
             image_title = html.unescape(image_title) or selected_candidate.title
-            if selected_candidate.url == SEED_SOURCE_URL:
+            if selected_candidate.url == LAYLA_SOURCE_URL:
+                image_path = create_editorial_card(
+                    cfg, "guides", "LAYLA: главное — не отдавать дистанцию", "MOBALISTIC",
+                    source_url=LAYLA_SOURCE_URL, hero="Layla",
+                )
+            elif selected_candidate.url == SEED_SOURCE_URL:
                 image_path = create_hero_build_poster(
                     cfg, "Аргус", selected_candidate.image_url, "Сборка #1 / комьюнити-статистика",
                     "Marksman · 21/43", "War Cry · 27/43", "Inspire · 49%",
