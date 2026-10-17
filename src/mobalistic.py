@@ -423,6 +423,14 @@ def mlbbdex_get(path: str) -> dict[str, Any]:
         raise RuntimeError(f"Unexpected MLBBDex API response for {path}")
     return payload
 
+def canonical_item_name(value: str) -> str:
+    name = normalise(value)
+    name = re.sub(r"^(?:i\s+)?ice hunter's\s+", "", name)
+    name = re.sub(r"^(?:a\s+)?", "", name)
+    # Blessing variants share the base equipment icon/name.
+    name = name.split(" - ", 1)[0].strip()
+    return name
+
 def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
     """Fetch one source-backed build per run; rotate heroes and never invent item names."""
     try:
@@ -436,7 +444,7 @@ def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
             log.warning("MLBBDex returned incomplete hero/item/patch data")
             return None
 
-        item_by_name = {normalise(item.get("name", "")): item for item in items if item.get("name") and item.get("slug")}
+        item_by_name = {canonical_item_name(item.get("name", "")): item for item in items if item.get("name") and item.get("slug")}
         patch = patches[0] if isinstance(patches[0], dict) else {}
         patch_version = next(
             (str(patch.get(key)).strip() for key in ("version", "name", "patch", "number", "slug")
@@ -467,7 +475,7 @@ def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
                 continue
             resolved = []
             for name in names:
-                item = item_by_name.get(normalise(str(name)))
+                item = item_by_name.get(canonical_item_name(str(name)))
                 if not item:
                     resolved = []
                     break
