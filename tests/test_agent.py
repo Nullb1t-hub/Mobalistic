@@ -36,6 +36,15 @@ class MobalisticCoreTests(unittest.TestCase):
             self.assertEqual(len(build.get("items", [])), 6)
             self.assertTrue(all(item.get("name") and item.get("image_url", "").startswith("https://") for item in build["items"]))
 
+    def test_builds_are_the_top_content_priority(self):
+        from src.mobalistic import FEEDS_PATH
+        config = json.loads(FEEDS_PATH.read_text(encoding="utf-8"))
+        weights = config.get("category_weights", {})
+        self.assertGreater(weights.get("builds", 0), max((v for k, v in weights.items() if k != "builds"), default=0))
+
+    def test_hugging_face_paid_fallback_is_disabled_by_default(self):
+        self.assertFalse(agent.HF_PAID_FALLBACK)
+
     def test_memes_are_removed_from_editorial_config_and_engine(self):
         from src.mobalistic import FEEDS_PATH
         config = json.loads(FEEDS_PATH.read_text(encoding="utf-8"))
