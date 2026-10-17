@@ -829,6 +829,7 @@ def curated_layla_candidate(published_urls: set[str]) -> Candidate | None:
         summary="Базовый совет по позиционированию Layla: фармить безопасно, держать дистанцию и не входить первой в туман.",
         category="guides",
         published_at=datetime.now(timezone.utc).isoformat(),
+        image_url="https://raw.githubusercontent.com/Sparkies01/Splash/main/Layla/Blazing%20Gun.png",
     )
 
 def curated_seed_candidate(published_urls: set[str]) -> Candidate | None:
@@ -980,7 +981,7 @@ def main() -> int:
             if selected_candidate.url == LAYLA_SOURCE_URL:
                 image_path = create_editorial_card(
                     cfg, "guides", "LAYLA: главное — не отдавать дистанцию", "MOBALISTIC",
-                    source_url=LAYLA_SOURCE_URL, hero="Layla",
+                    source_url=LAYLA_SOURCE_URL, image_url=selected_candidate.image_url, hero="Layla",
                 )
             elif selected_candidate.url == SEED_SOURCE_URL:
                 image_path = create_hero_build_poster(
