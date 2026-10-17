@@ -497,98 +497,97 @@ def image_url_from_hero(data: dict[str, Any]) -> str:
     return ""
 
 def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None:
-    # Fail closed: never render/publish an unverified or incomplete build.
+    """Minimal build artwork: hero splash on top, six ordered item icons below, no decorative frames."""
     required = ("hero", "patch_version", "source_url", "verified_at", "items")
     if not build.get("verified") or any(not build.get(key) for key in required):
         log.warning("Skipping unverified/incomplete build: %s", build.get("hero", "unknown"))
         return None
     items = build["items"]
-    if len(items) != 6 or any(not x.get("name") or not x.get("image_url") for x in items):
-        log.warning("Build needs exactly six named items with image URLs: %s", build.get("hero"))
+    if len(items) != 6 or any(not x.get("name") or not str(x.get("image_url", "")).startswith("https://") for x in items):
+        log.warning("Build needs exactly six named items with HTTPS icons: %s", build.get("hero"))
         return None
     if not str(build["source_url"]).startswith("https://"):
         return None
 
-    # Download every item icon before drawing; if one is missing, do not fake it.
+    from io import BytesIO
     icons: list[Image.Image] = []
     for item in items:
         try:
-            response = requests.get(item["image_url"], timeout=REQUEST_TIMEOUT, headers={"User-Agent": "MobalisticBot/1.0"})
+            response = requests.get(item["image_url"], timeout=REQUEST_TIMEOUT,
+                                    headers={"User-Agent": "MobalisticBot/1.0"})
             response.raise_for_status()
             if len(response.content) > 3_000_000:
                 return None
-            from io import BytesIO
             icon = Image.open(BytesIO(response.content)).convert("RGBA")
-            icon.thumbnail((112, 112), Image.Resampling.LANCZOS)
+            if icon.width < 24 or icon.height < 24:
+                return None
             icons.append(icon)
         except Exception as exc:
             log.warning("Cannot load icon for %s: %s", item.get("name"), exc)
             return None
 
-    DRAFTS.mkdir(parents=True, exist_ok=True)
-    image, draw = draw_background(cfg)
-    accent = cfg.get("brand", {}).get("accent", "#A78BFA")
-    draw.rounded_rectangle((70, 190, 420, 242), radius=24, fill=accent)
-    draw.text((92, 203), f"СБОРКА  /  {build['patch_version']}", font=font(18, True), fill="#10111A")
-    draw.text((70, 280), str(build["hero"]).upper(), font=font(66, True), fill="#FFFFFF")
-    draw.text((72, 365), "6 ПРЕДМЕТОВ  •  ПОРЯДОК ПО СХЕМЕ", font=font(20, True), fill=accent)
+    # Prefer the actual hero splash supplied by the build source. AI art is only a fallback,
+    # never a reason to replace the correct item order or use an unrelated web image.
+    hero_art = None
+    hero_url = str(build.get("hero_image_url", ""))
+    if hero_url.startswith("https://"):
+        hero_art = article_image(hero_url)
+    if hero_art is None:
+        hero_art = generate_ai_artwork(art_prompt("builds", f"{build['hero']} hero", str(build["hero"])))
+    if hero_art is None:
+        log.warning("No usable hero splash or generated art for %s; skip rather than publish a broken card", build["hero"])
+        return None
 
-    # Try original AI key art for the hero header. If generation is unavailable, keep the clean
-    # build infographic and exact item icons; do not substitute an unrelated/open-web hero image.
-    hero_art = generate_ai_artwork(art_prompt("builds", f"{build['hero']} hero build", str(build["hero"])))
-    if hero_art is not None:
-        hero_art = hero_art.convert("RGBA")
-        hero_art.thumbnail((320, 270), Image.Resampling.LANCZOS)
-        panel = Image.new("RGBA", (320, 270), (20, 22, 39, 235))
-        panel.alpha_composite(hero_art, ((320 - hero_art.width) // 2, (270 - hero_art.height) // 2))
-        image.paste(panel.convert("RGB"), (690, 170))
-        draw = ImageDraw.Draw(image, "RGBA")
-        draw.rounded_rectangle((690, 170, 1010, 440), radius=24, outline=(167, 139, 250, 180), width=2)
+    width, height = 1080, 1350
+    hero_height = 900
+    scale = max(width / hero_art.width, hero_height / hero_art.height)
+    hero_art = hero_art.resize((int(hero_art.width * scale), int(hero_art.height * scale)), Image.Resampling.LANCZOS)
+    left = (hero_art.width - width) // 2
+    top = max(0, min(hero_art.height - hero_height, int((hero_art.height - hero_height) * 0.35)))
+    hero_crop = hero_art.crop((left, top, left + width, top + hero_height)).convert("RGBA")
+    image = Image.new("RGBA", (width, height), (10, 12, 20, 255))
+    image.alpha_composite(hero_crop, (0, 0))
 
-    start_x, start_y = 70, 430
-    cell_w, cell_h, gap_x, gap_y = 300, 205, 28, 22
+    # A simple dark fade lets the item row read clearly while keeping the hero artwork dominant.
+    fade = Image.new("RGBA", (width, hero_height), (0, 0, 0, 0))
+    fd = ImageDraw.Draw(fade)
+    for y in range(560, hero_height):
+        alpha = int(8 + 110 * ((y - 560) / (hero_height - 560)))
+        fd.line((0, y, width, y), fill=(5, 7, 14, alpha))
+    image.alpha_composite(fade, (0, 0))
+    draw = ImageDraw.Draw(image, "RGBA")
+    draw.text((48, 42), str(build["hero"]).upper(), font=font(54, True), fill=(255, 255, 255, 245),
+              stroke_width=2, stroke_fill=(0, 0, 0, 150))
+    draw.text((52, 108), f"СБОРКА · ПАТЧ {build['patch_version']}", font=font(22, True),
+              fill=(235, 231, 255, 240), stroke_width=1, stroke_fill=(0, 0, 0, 120))
+
+    # Flat, borderless item strip: six icons in the exact source order.
+    strip_y = hero_height
+    draw.rectangle((0, strip_y, width, height), fill=(10, 12, 20, 255))
+    margin = 34
+    cell_w = (width - 2 * margin) // 6
+    icon_size = 116
     for idx, (item, icon) in enumerate(zip(items, icons)):
-        row, col = divmod(idx, 3)
-        x = start_x + col * (cell_w + gap_x)
-        y = start_y + row * (cell_h + gap_y)
-        draw.rounded_rectangle((x, y, x + cell_w, y + cell_h), radius=22, fill=(20, 22, 39, 245), outline=(167, 139, 250, 110), width=2)
-        draw.ellipse((x + 18, y + 18, x + 58, y + 58), fill=accent)
-        draw.text((x + 31, y + 24), str(idx + 1), font=font(20, True), fill="#11121B")
-        icon_x, icon_y = x + 94, y + 24
-        image.alpha_composite(icon, (icon_x, icon_y)) if image.mode == "RGBA" else image.paste(icon, (icon_x, icon_y), icon)
-        item_font = font(19, True)
-        item_lines = wrap_by_pixels(draw, str(item["name"]), item_font, cell_w - 28)
-        text_y = y + 145
-        for line in item_lines[:2]:
-            draw.text((x + 14, text_y), line, font=item_font, fill="#FFFFFF")
-            text_y += 25
+        x = margin + idx * cell_w + (cell_w - icon_size) // 2
+        y = strip_y + 40
+        icon.thumbnail((icon_size, icon_size), Image.Resampling.LANCZOS)
+        image.alpha_composite(icon, (x, y))
+        draw = ImageDraw.Draw(image, "RGBA")
+        draw.text((margin + idx * cell_w + 4, strip_y + 19), str(idx + 1),
+                  font=font(18, True), fill=(180, 158, 255, 255))
+        item_font = font(15, True)
+        lines = wrap_by_pixels(draw, str(item["name"]), item_font, cell_w - 8)
+        text_y = strip_y + 170
+        for line in lines[:3]:
+            box = draw.textbbox((0, 0), line, font=item_font)
+            draw.text((margin + idx * cell_w + (cell_w - (box[2] - box[0])) // 2, text_y),
+                      line, font=item_font, fill=(245, 245, 250, 255))
+            text_y += 20
 
-    meta_y = 895
-    if build.get("emblem_name"):
-        draw.text((72, meta_y), "ЭМБЛЕМА", font=font(16, True), fill=accent)
-        draw.text((72, meta_y + 28), str(build["emblem_name"])[:56], font=font(23, True), fill="#FFFFFF")
-        emblem_url = str(build.get("emblem_image_url", ""))
-        if emblem_url.startswith("https://"):
-            try:
-                r = requests.get(emblem_url, timeout=REQUEST_TIMEOUT, headers={"User-Agent": "MobalisticBot/1.0"})
-                r.raise_for_status()
-                if len(r.content) <= 1_500_000 and r.headers.get("Content-Type", "").lower().startswith("image/"):
-                    from io import BytesIO
-                    emblem_icon = Image.open(BytesIO(r.content)).convert("RGBA")
-                    emblem_icon.thumbnail((72, 72), Image.Resampling.LANCZOS)
-                    image.alpha_composite(emblem_icon, (300, meta_y + 16))
-            except Exception as exc:
-                log.info("Source emblem icon unavailable: %s", exc)
-    if build.get("battle_spell_names"):
-        draw.text((520, meta_y), "БОЕВЫЕ ЗАКЛИНАНИЯ", font=font(16, True), fill=accent)
-        draw.text((520, meta_y + 28), str(build["battle_spell_names"])[:60], font=font(23, True), fill="#FFFFFF")
-
-    draw.text((70, 1125), f"Данные обновлены: {str(build['verified_at'])[:10]}", font=font(20, True), fill="#FFFFFF")
-    draw.text((70, 1165), "Сверяйся с текущим патчем перед матчем.", font=font(19), fill=(220, 220, 238, 230))
-    out = DRAFTS / f"build-{re.sub(r'[^a-zA-Z0-9_-]+', '-', str(build['hero']).lower())}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.png"
-    image.save(out, "PNG", optimize=True)
+    out = DRAFTS / f"build-{re.sub(r'[^a-zA-Z0-9_-]+', '-', str(build['hero']).lower())}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.jpg"
+    image.convert("RGB").save(out, "JPEG", quality=94, optimize=True)
+    log.info("Created clean hero build card: hero=%s items=6 patch=%s", build["hero"], build["patch_version"])
     return out
-
 
 def create_hero_build_poster(cfg: dict[str, Any], hero: str, hero_image_url: str, build_label: str,
                              emblem_text: str, talent_text: str, spell_text: str) -> Path | None:
@@ -801,18 +800,30 @@ def eligible_builds() -> list[dict[str, Any]]:
     ]
 
 def build_caption(build: dict[str, Any]) -> str:
-    names = "\n".join(f"{i}. {item['name']}" for i, item in enumerate(build["items"], 1))
-    return (
-        f"⚔️ {build['hero']} — сборка предметов\n"
-        f"Патч: {build['patch_version']}\n\n"
-        f"{names}\n\n"
-        + (f"🧬 Эмблема: {build['emblem_name']}\n" if build.get("emblem_name") else "")
-        + (f"⚡ Боевые заклинания: {build['battle_spell_names']}\n" if build.get("battle_spell_names") else "")
-        + f"\nДанные сборки: {build.get('context') or build.get('source_build_name', 'рекомендация источника')}\n"
-        f"Источник: {build['source_url']}\n"
-        f"{build.get('attribution', 'Источник данных указан по ссылке.')}\n\n"
-        "#MobileLegends #MLBB #Mobalistic"
-    )[:1024]
+    items = "\\n".join(f"{i}. {item['name']}" for i, item in enumerate(build["items"], 1))
+    context = str(build.get("context") or build.get("source_build_name") or "").strip()
+    lines = [
+        f"⚔️ <b>{html.escape(str(build['hero']))} — сборка</b>",
+        f"Версия игры: <b>{html.escape(str(build['patch_version']))}</b>",
+        "",
+        "<b>Предметы по порядку</b>",
+        items,
+    ]
+    if build.get("emblem_name"):
+        lines.extend(["", f"🧬 Эмблема: <b>{html.escape(str(build['emblem_name']))}</b>"])
+    if build.get("battle_spell_names"):
+        lines.append(f"⚡ Заклинание: <b>{html.escape(str(build['battle_spell_names']))}</b>")
+    if context:
+        lines.extend(["", html.escape(context)])
+    lines.extend([
+        "",
+        f"🔎 <a href=\"{html.escape(str(build['source_url']), quote=True)}\">Источник сборки</a>",
+        "Перед матчем проверь патч и подстрой предметы под состав врага.",
+        "",
+        "#MLBB #MobileLegends #Mobalistic",
+    ])
+    caption = "\\n".join(lines)
+    return caption if len(caption) <= 1024 else caption[:1000]
 
 SEED_SOURCE_URL = "https://mlbb.io/tl/hero/argus/build"
 SEED_POSTER_V2_KEY = "seed:argus-poster-v2"
@@ -911,12 +922,8 @@ def main() -> int:
                f"build:{api_build.get('hero')}:{api_build.get('patch_version')}:{api_build.get('source_build_name', 'Build')}"
         ]
 
-    # One-time Layla post bypasses cooldown to verify AI artwork after token setup.
-    force_layla_only = PUBLISH_ENABLED and LAYLA_AI_TEST_KEY not in published
-    # Retain the older Argus review fallback only after the Layla test has been published.
-    force_seed_only = PUBLISH_ENABLED and not force_layla_only and SEED_POSTER_V3_KEY not in published
     last_post_raw = str(state.get("last_post_at", "")).strip()
-    if PUBLISH_ENABLED and last_post_raw and not force_seed_only and not force_layla_only and not api_build and not builds:
+    if PUBLISH_ENABLED and last_post_raw and not api_build and not builds:
         try:
             last_post_at = datetime.fromisoformat(last_post_raw.replace("Z", "+00:00"))
             if last_post_at.tzinfo is None:
@@ -927,26 +934,8 @@ def main() -> int:
                 return 0
         except ValueError:
             log.warning("Invalid last_post_at in state; cooldown cannot be evaluated.")
-    elif force_seed_only:
-        log.info("One-time review post enabled: only the redesigned Argus card may publish; all other sources are held.")
 
     candidates = collect_candidates(cfg, published)
-    seed = curated_seed_candidate(published)
-    layla_seed = curated_layla_candidate(published)
-    if force_layla_only:
-        # Strictly hold every other candidate so this run can only publish Layla.
-        candidates = [layla_seed] if layla_seed is not None else []
-        builds = []
-        log.info("One-time Layla AI-art review post enabled; all other sources are held.")
-    elif force_seed_only:
-        # Strictly prevent any old/other article from being selected during this one-time bypass.
-        candidates = [seed] if seed is not None else []
-        builds = []
-        if seed is None:
-            log.warning("One-time review post unavailable; no post sent and cooldown state remains unchanged.")
-    elif seed is not None and all(candidate.url != seed.url for candidate in candidates):
-        candidates.append(seed)
-        log.info("Added one-time source-backed starter post to prevent an empty first launch.")
     available: set[str] = set()
     if builds:
         available.add("builds")
@@ -992,39 +981,21 @@ def main() -> int:
             if selected_candidate is None:
                 continue
             try:
-                caption = (LAYLA_CAPTION if selected_candidate.url == LAYLA_SOURCE_URL else (SEED_CAPTION if selected_candidate.url == SEED_SOURCE_URL else make_caption(selected_candidate)))
+                caption = make_caption(selected_candidate)
             except Exception as exc:
-                log.warning("AI generation failed; skip source %s: %s", selected_candidate.url, exc)
+                log.warning("AI caption generation failed; skip source %s: %s", selected_candidate.url, exc)
                 used_urls.add(selected_candidate.url)
                 continue
             used_urls.add(selected_candidate.url)
             if not caption:
                 continue
-            # Use the AI-written Russian headline on the image, not the English RSS headline.
             image_title = re.sub(r"<[^>]+>", "", caption.splitlines()[0]).strip()[:110]
             image_title = html.unescape(image_title) or selected_candidate.title
-            if selected_candidate.url == LAYLA_SOURCE_URL:
-                image_path = create_editorial_card(
-                    cfg, "guides", "LAYLA: главное — не отдавать дистанцию", "MOBALISTIC",
-                    source_url=LAYLA_SOURCE_URL, image_url=selected_candidate.image_url, hero="Layla",
-                )
-            elif selected_candidate.url == SEED_SOURCE_URL:
-                image_path = create_hero_build_poster(
-                    cfg, "Аргус", selected_candidate.image_url, "Сборка #1 / комьюнити-статистика",
-                    "Marksman · 21/43", "War Cry · 27/43", "Inspire · 49%",
-                )
-                if image_path is None:
-                    # Fallback to the original build page's own artwork, never a generated placeholder.
-                    image_path = create_hero_build_poster(
-                        cfg, "Аргус", SEED_SOURCE_URL, "Сборка #1 / комьюнити-статистика",
-                        "Marksman · 21/43", "War Cry · 27/43", "Inspire · 49%",
-                    )
-            else:
-                image_path = create_editorial_card(
-                    cfg, category, image_title, selected_candidate.publisher,
-                    source_url=selected_candidate.url, image_url=selected_candidate.image_url,
-                )
-            source_key = LAYLA_AI_TEST_KEY if selected_candidate.url == LAYLA_SOURCE_URL else (SEED_POSTER_V3_KEY if selected_candidate.url == SEED_SOURCE_URL else selected_candidate.url)
+            image_path = create_editorial_card(
+                cfg, category, image_title, selected_candidate.publisher,
+                source_url=selected_candidate.url, image_url=selected_candidate.image_url,
+            )
+            source_key = selected_candidate.url
 
         if image_path is None or not caption:
             continue
