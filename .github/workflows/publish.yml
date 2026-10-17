@@ -7,7 +7,7 @@ on:
       - '.github/workflows/publish.yml'
   workflow_dispatch:
   schedule:
-    - cron: "19 */6 * * *"
+    - cron: "20 */6 * * *"
 
 permissions:
   contents: write
