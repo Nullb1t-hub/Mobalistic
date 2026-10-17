@@ -757,24 +757,21 @@ SEED_SOURCE_URL = "https://mlbb.io/tl/hero/argus/build"
 SEED_POSTER_V2_KEY = "seed:argus-poster-v2"
 SEED_POSTER_V3_KEY = "seed:argus-poster-v3"
 SEED_CAPTION = (
-    "<b>Аргус — сборка #1: что чаще берут</b>\n\n"
-    "Залетел посмотреть, что собирают на Аргуса: в выборке из 43 сборок чаще всего стоят Marksman и War Cry. "
-    "По заклинаниям впереди Inspire, но Petrify тоже встречается — тут уже смотри по пикам и тому, как хочешь заходить в файт.\n\n"
-    "Это статистика выборов, не кнопка «победить». Предметы всё равно подстраивай под составы.\n\n"
-    "🔗 <a href=\"https://mlbb.io/tl/hero/argus/build\">Источник</a>\n"
-    "#Аргус #АргусСборка1 #СборкиMLBB #MLBB #Mobalistic"
+    "⚔️ <b>ARGUS — COMMUNITY BUILD #01</b>\n"
+    "<i>What players pick most often</i>\n\n"
+    "🧬 <b>Emblem:</b> Marksman — 21/43\n"
+    "🔥 <b>Talent:</b> War Cry — 27/43\n"
+    "⚡ <b>Battle Spell:</b> Inspire — 49%\n\n"
+    "Это срез выборов из 43 сборок, а не винрейт и не универсальная сборка. Подстраивайся под матчап и составы.\n\n"
+    "🔗 <a href=\"https://mlbb.io/tl/hero/argus/build\">Build source</a>\n\n"
+    "#Argus #ArgusBuild #MLBBBuilds #MLBB #MobileLegends #Mobalistic"
 )
 
 def curated_seed_candidate(published_urls: set[str]) -> Candidate | None:
     """One-time redesigned Argus build card, separate from the old starter post."""
-    if SEED_POSTER_V2_KEY in published_urls:
+    if SEED_POSTER_V3_KEY in published_urls:
         return None
-    image_url = ""
-    try:
-        detail = mlbbdex_get("heroes/argus").get("data", {})
-        image_url = image_url_from_hero(detail)
-    except Exception as exc:
-        log.warning("Could not load Argus artwork from MLBBDex: %s", exc)
+    image_url = "https://raw.githubusercontent.com/Sparkies01/Splash/main/Argus/Dark%20Angel.png"
     return Candidate(
         url=SEED_SOURCE_URL,
         title="Аргус: что сейчас берут в сборках",
@@ -925,7 +922,7 @@ def main() -> int:
                     cfg, category, image_title, selected_candidate.publisher,
                     source_url=selected_candidate.url, image_url=selected_candidate.image_url,
                 )
-            source_key = SEED_POSTER_V2_KEY if selected_candidate.url == SEED_SOURCE_URL else selected_candidate.url
+            source_key = SEED_POSTER_V3_KEY if selected_candidate.url == SEED_SOURCE_URL else selected_candidate.url
 
         if image_path is None or not caption:
             continue
