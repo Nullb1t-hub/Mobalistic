@@ -1,14 +1,15 @@
 {
   "published": [
-    "https://news.google.com/rss/articles/CBMijwFBVV95cUxPM25mSDNHd0huWjVrRFdVcThRWk1vOGpUTUZQTTl5M2VjdHdxUWYySHg5WGtPWWJrbDlVTWkxVXMxaEpJMXRBV2tsY0VFVV9KdmdDQkVmOVRjYVcxbGdFTVFSMFcyRGxlOUNjR0h1TkpXd25oMWJmTGVGcGFrSlpCUmNBbmh3YlpyZVI3bHljUQ?oc=5",
-    "https://news.google.com/rss/articles/CBMigAFBVV95cUxNWlRuQjJBMnVDX1pLcjEwWGRRUUd2N21XeTlHUzdCZlZGeG9MSDAwNURxQlpuLVhqWnJYUGdLdVZKZTg0QXVoSlFIaXRGbS1xTE5tY3FfUUFmcUtzdkJ3bTNMVldxV1hoYl9uOGZ2X2JzSWJLblVMejdlWkw4SkFkcw?oc=5",
     "seed:argus-poster-v2",
-    "https://mlbb.io/tl/hero/argus/build"
+    "https://mlbb.io/tl/hero/argus/build",
+    "https://news.google.com/rss/articles/CBMigAFBVV95cUxNWlRuQjJBMnVDX1pLcjEwWGRRUUd2N21XeTlHUzdCZlZGeG9MSDAwNURxQlpuLVhqWnJYUGdLdVZKZTg0QXVoSlFIaXRGbS1xTE5tY3FfUUFmcUtzdkJ3bTNMVldxV1hoYl9uOGZ2X2JzSWJLblVMejdlWkw4SkFkcw?oc=5",
+    "seed:argus-poster-v3",
+    "https://news.google.com/rss/articles/CBMijwFBVV95cUxPM25mSDNHd0huWjVrRFdVcThRWk1vOGpUTUZQTTl5M2VjdHdxUWYySHg5WGtPWWJrbDlVTWkxVXMxaEpJMXRBV2tsY0VFVV9KdmdDQkVmOVRjYVcxbGdFTVFSMFcyRGxlOUNjR0h1TkpXd25oMWJmTGVGcGFrSlpCUmNBbmh3YlpyZVI3bHljUQ?oc=5"
   ],
   "last_category": "guides",
   "category_counts": {
-    "guides": 4
+    "guides": 5
   },
-  "last_post_at": "2026-10-17T22:51:07.879956+00:00",
+  "last_post_at": "2026-10-17T22:54:36.820395+00:00",
   "build_cursor": 7
 }
