@@ -614,8 +614,14 @@ def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
         detail = detail_payload.get("data", {})
         builds = detail.get("builds", [])
         if not isinstance(builds, list) or not builds:
-            log.info("No source build currently available for %s", hero["name"])
-            return None
+            attempts = int(state.get("_build_attempts", 0))
+            log.info("No source build currently available for %s; trying next hero (%s/8)", hero["name"], attempts + 1)
+            if attempts >= min(7, len(heroes) - 1):
+                state.pop("_build_attempts", None)
+                return None
+            state["build_cursor"] = (cursor + 1) % len(heroes)
+            state["_build_attempts"] = attempts + 1
+            return discover_one_source_build(state)
 
         for source_build in builds:
             names = source_build.get("items", []) if isinstance(source_build, dict) else []
@@ -655,6 +661,8 @@ def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
             }
             key = f"build:{build['hero']}:{patch_version}:{source_build.get('name', 'Build')}"
             if key not in set(state.get("published", [])):
+                state.pop("_build_attempts", None)
+                state["build_cursor"] = cursor
                 return build
         return None
     except Exception as exc:
