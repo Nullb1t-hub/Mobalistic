@@ -884,7 +884,11 @@ def main() -> int:
         and f"build:{b.get('hero')}:{b.get('patch_version')}" not in published
     ]
     # The agent discovers source-backed builds on every run; the registry is only a fallback.
+    cursor_before_discovery = state.get("build_cursor", 0)
     api_build = discover_one_source_build(state)
+    if api_build is None and state.get("build_cursor", 0) != cursor_before_discovery:
+        # Persist rotation even when this scan has no build, so the next run checks new heroes.
+        write_json(STATE_PATH, state)
     if api_build:
         builds = [api_build] + [
             b for b in builds
