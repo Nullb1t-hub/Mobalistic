@@ -637,6 +637,8 @@ def main() -> int:
                 log.exception("Telegram publication failed; state was not advanced")
                 return 3
             published.add(source_key)
+            if category == "builds" and selected.get("verification_method"):
+                state["build_cursor"] = int(state.get("build_cursor", 0)) + 1
             state["published"] = list(published)[-3000:]
             counts[category] = int(counts.get(category, 0)) + 1
             state["category_counts"] = counts
