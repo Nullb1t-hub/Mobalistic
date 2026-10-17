@@ -336,7 +336,9 @@ def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publis
     brand = cfg.get("brand", {})
     accent = brand.get("accent", "#A78BFA")
     base = brand.get("background", "#0B0D16")
-    artwork = article_image(image_url or source_url)
+    artwork = article_image(image_url) if image_url else None
+    if artwork is None and source_url:
+        artwork = article_image(source_url)
     # No generic fake cover: skip stories without genuine publisher artwork.
     if artwork is None:
         log.info("Skipping editorial item without genuine artwork: %s", title)
@@ -694,6 +696,37 @@ def build_caption(build: dict[str, Any]) -> str:
         "#MobileLegends #MLBB #Mobalistic"
     )[:1024]
 
+SEED_SOURCE_URL = "https://mlbb.io/tl/hero/argus/build"
+SEED_CAPTION = (
+    "<b>Аргус: что сейчас берут в сборках</b>\n\n"
+    "В сводке 43 комьюнити-сборок MLBB.io (обновление 17 октября) чаще всего встречаются "
+    "эмблема Marksman (21 из 43) и талант War Cry (27 из 43). Из боевых заклинаний лидирует "
+    "Inspire — 49%; Petrify тоже используют.\n\n"
+    "Это частота выборов, не винрейт и не универсальная сборка: подстраивай предметы под драфт.\n\n"
+    "🔗 <a href=\"https://mlbb.io/tl/hero/argus/build\">Источник</a>\n"
+    "#MLBB #Argus #Mobalistic"
+)
+
+def curated_seed_candidate(published_urls: set[str]) -> Candidate | None:
+    """One-time, source-backed starter post so an empty feed cannot leave the channel silent."""
+    if SEED_SOURCE_URL in published_urls:
+        return None
+    image_url = ""
+    try:
+        detail = mlbbdex_get("heroes/argus").get("data", {})
+        image_url = image_url_from_hero(detail)
+    except Exception as exc:
+        log.warning("Could not load Argus artwork from MLBBDex: %s", exc)
+    return Candidate(
+        url=SEED_SOURCE_URL,
+        title="Аргус: что сейчас берут в сборках",
+        publisher="MLBB.io",
+        summary="Сводка 43 комьюнити-сборок Argus, обновлённая 17 октября 2026 года: Marksman emblem 21/43, War Cry 27/43, Inspire 49%, Petrify 23%. Это частота выбора, не винрейт.",
+        category="guides",
+        published_at=datetime.now(timezone.utc).isoformat(),
+        image_url=image_url,
+    )
+
 def select_category(cfg: dict[str, Any], available: set[str], counts: dict[str, int]) -> str | None:
     weights = cfg.get("category_weights", {})
     # Only select a category when there is real material for it.
@@ -746,6 +779,10 @@ def main() -> int:
                f"build:{api_build.get('hero')}:{api_build.get('patch_version')}:{api_build.get('source_build_name', 'Build')}"
         ]
     candidates = collect_candidates(cfg, published)
+    seed = curated_seed_candidate(published)
+    if seed is not None and all(candidate.url != seed.url for candidate in candidates):
+        candidates.append(seed)
+        log.info("Added one-time source-backed starter post to prevent an empty first launch.")
     available: set[str] = set()
     if builds:
         available.add("builds")
@@ -791,7 +828,7 @@ def main() -> int:
             if selected_candidate is None:
                 continue
             try:
-                caption = make_caption(selected_candidate)
+                caption = SEED_CAPTION if selected_candidate.url == SEED_SOURCE_URL else make_caption(selected_candidate)
             except Exception as exc:
                 log.warning("AI generation failed; skip source %s: %s", selected_candidate.url, exc)
                 used_urls.add(selected_candidate.url)
