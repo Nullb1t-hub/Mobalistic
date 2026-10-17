@@ -34,6 +34,7 @@ PUBLISH_ENABLED = os.getenv("PUBLISH_ENABLED", "false").lower() == "true"
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 MAX_POSTS_PER_RUN = max(1, min(5, int(os.getenv("MAX_POSTS_PER_RUN", "2"))))
 MAX_AGE_DAYS = max(1, min(14, int(os.getenv("MAX_AGE_DAYS", "7"))))
 REQUEST_TIMEOUT = 25
@@ -153,7 +154,7 @@ def gemini_text(prompt: str) -> str:
         raise RuntimeError("GEMINI_API_KEY is missing")
     endpoint = (
         "https://generativelanguage.googleapis.com/v1beta/"
-        "models/gemini-2.5-flash:generateContent"
+        f"models/{quote(GEMINI_MODEL, safe='')}:generateContent"
     )
     response = requests.post(
         endpoint,
