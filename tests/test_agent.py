@@ -51,5 +51,18 @@ class MobalisticCoreTests(unittest.TestCase):
         self.assertEqual(kwargs["data"]["caption"], "<b>Заголовок</b>\nТекст поста")
         self.assertEqual(kwargs["data"]["parse_mode"], "HTML")
 
+
+    def test_publication_is_capped_at_one_per_run(self):
+        self.assertEqual(agent.MAX_POSTS_PER_RUN, 1)
+
+    def test_editorial_image_is_not_generated_without_real_artwork(self):
+        with patch.object(agent, "article_image", return_value=None):
+            result = agent.create_editorial_card(
+                {"brand":{"accent":"#A78BFA","background":"#0B0D16"}},
+                "news", "Тестовый заголовок", "ONE Esports",
+                source_url="https://example.com/article"
+            )
+        self.assertIsNone(result)
+
 if __name__ == "__main__":
     unittest.main()
