@@ -744,6 +744,7 @@ def build_caption(build: dict[str, Any]) -> str:
     )[:1024]
 
 SEED_SOURCE_URL = "https://mlbb.io/tl/hero/argus/build"
+SEED_POSTER_V2_KEY = "seed:argus-poster-v2"
 SEED_CAPTION = (
     "<b>Аргус — сборка #1: что чаще берут</b>\n\n"
     "Залетел посмотреть, что собирают на Аргуса: в выборке из 43 сборок чаще всего стоят Marksman и War Cry. "
@@ -754,8 +755,8 @@ SEED_CAPTION = (
 )
 
 def curated_seed_candidate(published_urls: set[str]) -> Candidate | None:
-    """One-time, source-backed starter post so an empty feed cannot leave the channel silent."""
-    if SEED_SOURCE_URL in published_urls:
+    """One-time redesigned Argus build card, separate from the old starter post."""
+    if SEED_POSTER_V2_KEY in published_urls:
         return None
     image_url = ""
     try:
@@ -897,7 +898,7 @@ def main() -> int:
                     cfg, category, image_title, selected_candidate.publisher,
                     source_url=selected_candidate.url, image_url=selected_candidate.image_url,
                 )
-            source_key = selected_candidate.url
+            source_key = SEED_POSTER_V2_KEY if selected_candidate.url == SEED_SOURCE_URL else selected_candidate.url
 
         if image_path is None or not caption:
             continue
