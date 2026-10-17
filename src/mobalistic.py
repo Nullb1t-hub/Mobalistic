@@ -375,7 +375,7 @@ def article_image(url: str) -> Image.Image | None:
         log.info("Article artwork unavailable; use branded fallback: %s", exc)
         return None
 
-def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publisher: str = "", source_url: str = "", image_url: str = "") -> Path:
+def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publisher: str = "", source_url: str = "", image_url: str = "", hero: str = "") -> Path:
     """Create an editorial image with real publisher artwork when available."""
     DRAFTS.mkdir(parents=True, exist_ok=True)
     width, height = 1080, 1350
@@ -383,7 +383,7 @@ def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publis
     accent = brand.get("accent", "#A78BFA")
     base = brand.get("background", "#0B0D16")
     # AI-generated cinematic artwork is preferred; use real source art if free inference is unavailable.
-    artwork = generate_ai_artwork(art_prompt(category, title))
+    artwork = generate_ai_artwork(art_prompt(category, title, hero=hero))
     if artwork is None and image_url:
         artwork = article_image(image_url)
     if artwork is None and source_url:
@@ -806,6 +806,16 @@ def build_caption(build: dict[str, Any]) -> str:
 SEED_SOURCE_URL = "https://mlbb.io/tl/hero/argus/build"
 SEED_POSTER_V2_KEY = "seed:argus-poster-v2"
 SEED_POSTER_V3_KEY = "seed:argus-poster-v3"
+LAYLA_AI_TEST_KEY = "seed:layla-ai-art-test"
+LAYLA_SOURCE_URL = "https://mobile-legends.fandom.com/wiki/Layla"
+LAYLA_CAPTION = (
+    "🎯 <b>LAYLA: главное — не отдавать дистанцию</b>\n\n"
+    "Лейла раскрывается, когда спокойно фармит и бьёт с безопасной позиции. Не забегай первой в туман и не стой на месте во время файта: дождись, пока команда покажет угрозы, и держи врагов на расстоянии.\n\n"
+    "Это базовый совет по позиционированию, не сборка и не обещание лёгкой победы.\n"
+    "🔗 <a href=\"https://mobile-legends.fandom.com/wiki/Layla\">Страница героя</a>\n\n"
+    "#Layla #LaylaGuide #MLBB #MobileLegends #Mobalistic"
+)
+
 SEED_CAPTION = (
     "⚔️ <b>ARGUS — COMMUNITY BUILD #01</b>\n"
     "<i>What players pick most often</i>\n\n"
@@ -816,6 +826,19 @@ SEED_CAPTION = (
     "🔗 <a href=\"https://mlbb.io/tl/hero/argus/build\">Build source</a>\n\n"
     "#Argus #ArgusBuild #MLBBBuilds #MLBB #MobileLegends #Mobalistic"
 )
+
+def curated_layla_candidate(published_urls: set[str]) -> Candidate | None:
+    """One-time Layla editorial post to verify AI artwork after token setup."""
+    if LAYLA_AI_TEST_KEY in published_urls:
+        return None
+    return Candidate(
+        url=LAYLA_SOURCE_URL,
+        title="LAYLA: главное — не отдавать дистанцию",
+        publisher="Mobalistic",
+        summary="Базовый совет по позиционированию Layla: фармить безопасно, держать дистанцию и не входить первой в туман.",
+        category="guides",
+        published_at=datetime.now(timezone.utc).isoformat(),
+    )
 
 def curated_seed_candidate(published_urls: set[str]) -> Candidate | None:
     """One-time redesigned Argus build card, separate from the old starter post."""
@@ -945,7 +968,7 @@ def main() -> int:
             if selected_candidate is None:
                 continue
             try:
-                caption = SEED_CAPTION if selected_candidate.url == SEED_SOURCE_URL else make_caption(selected_candidate)
+                caption = (LAYLA_CAPTION if selected_candidate.url == LAYLA_SOURCE_URL else (SEED_CAPTION if selected_candidate.url == SEED_SOURCE_URL else make_caption(selected_candidate)))
             except Exception as exc:
                 log.warning("AI generation failed; skip source %s: %s", selected_candidate.url, exc)
                 used_urls.add(selected_candidate.url)
@@ -972,7 +995,7 @@ def main() -> int:
                     cfg, category, image_title, selected_candidate.publisher,
                     source_url=selected_candidate.url, image_url=selected_candidate.image_url,
                 )
-            source_key = SEED_POSTER_V3_KEY if selected_candidate.url == SEED_SOURCE_URL else selected_candidate.url
+            source_key = LAYLA_AI_TEST_KEY if selected_candidate.url == LAYLA_SOURCE_URL else (SEED_POSTER_V3_KEY if selected_candidate.url == SEED_SOURCE_URL else selected_candidate.url)
 
         if image_path is None or not caption:
             continue
