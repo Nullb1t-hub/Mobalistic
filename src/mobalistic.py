@@ -293,6 +293,10 @@ def article_image(url: str) -> Image.Image | None:
             allow_redirects=True,
         )
         response.raise_for_status()
+        final_host = (urlparse(response.url).hostname or "").lower()
+        if final_host == "news.google.com" or final_host.endswith(".google.com") or final_host == "google.com":
+            log.info("Skipping Google-hosted placeholder artwork for %s", url)
+            return None
         content_type = response.headers.get("Content-Type", "").lower()
         if content_type.startswith("image/"):
             payload = response.content
@@ -304,7 +308,8 @@ def article_image(url: str) -> Image.Image | None:
                 html_text, flags=re.I,
             )
             image_url = next((first or second for first, second in matches if (first or second).startswith("https://")), "")
-            if not image_url:
+            image_host = (urlparse(image_url).hostname or "").lower()
+            if not image_url or image_host == "news.google.com" or image_host.endswith(".google.com") or image_host == "google.com":
                 return None
             image_response = requests.get(
                 image_url, timeout=12,
@@ -410,7 +415,7 @@ def source_image_value(value: Any) -> str:
 
 def image_url_from_hero(data: dict[str, Any]) -> str:
     """Return a hero artwork URL only when the upstream API explicitly provides one."""
-    keys = ("splash_art", "splashArt", "artwork_url", "artwork", "portrait_url", "portrait", "image_url", "image", "icon_url", "icon", "cover_url", "cover")
+    keys = ("splash_art", "splashArt", "artwork_url", "artwork", "portrait_url", "portraitUrl", "portrait", "image_url", "imageUrl", "image", "icon_url", "iconUrl", "icon", "avatar", "cover_url", "cover")
     for key in keys:
         value = data.get(key)
         if isinstance(value, str) and value.startswith("https://"):
@@ -625,7 +630,7 @@ def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
                 slug = str(item["slug"])
                 resolved.append({
                     "name": str(item["name"]),
-                    "image_url": f"{MLBBDEX_SITE}/visuels/objets/{slug}.webp",
+                    "image_url": image_url_from_hero(item),
                 })
             if len(resolved) != 6:
                 log.warning("Skipping %s build: item catalog could not resolve all six icons", hero["name"])
