@@ -378,6 +378,36 @@ def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publis
     image.convert("RGB").save(out, "JPEG", quality=91, optimize=True)
     return out
 
+def source_text_value(value: Any) -> str:
+    """Extract a human-readable label only from values explicitly present in the source API."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("name", "title", "label", "display_name"):
+            if isinstance(value.get(key), str) and value[key].strip():
+                return value[key].strip()
+    if isinstance(value, list):
+        labels = [source_text_value(item) for item in value]
+        return ", ".join(label for label in labels if label)
+    return ""
+
+
+def source_image_value(value: Any) -> str:
+    if isinstance(value, str) and value.startswith("https://"):
+        return value
+    if isinstance(value, dict):
+        for key in ("image_url", "icon_url", "image", "icon", "url", "src"):
+            nested = value.get(key)
+            if isinstance(nested, str) and nested.startswith("https://"):
+                return nested
+    if isinstance(value, list):
+        for item in value:
+            found = source_image_value(item)
+            if found:
+                return found
+    return ""
+
+
 def image_url_from_hero(data: dict[str, Any]) -> str:
     """Return a hero artwork URL only when the upstream API explicitly provides one."""
     keys = ("splash_art", "splashArt", "artwork_url", "artwork", "portrait_url", "portrait", "image_url", "image", "icon_url", "icon", "cover_url", "cover")
@@ -465,6 +495,26 @@ def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None
         for line in item_lines[:2]:
             draw.text((x + 14, text_y), line, font=item_font, fill="#FFFFFF")
             text_y += 25
+
+    meta_y = 895
+    if build.get("emblem_name"):
+        draw.text((72, meta_y), "ЭМБЛЕМА", font=font(16, True), fill=accent)
+        draw.text((72, meta_y + 28), str(build["emblem_name"])[:56], font=font(23, True), fill="#FFFFFF")
+        emblem_url = str(build.get("emblem_image_url", ""))
+        if emblem_url.startswith("https://"):
+            try:
+                r = requests.get(emblem_url, timeout=REQUEST_TIMEOUT, headers={"User-Agent": "MobalisticBot/1.0"})
+                r.raise_for_status()
+                if len(r.content) <= 1_500_000 and r.headers.get("Content-Type", "").lower().startswith("image/"):
+                    from io import BytesIO
+                    emblem_icon = Image.open(BytesIO(r.content)).convert("RGBA")
+                    emblem_icon.thumbnail((72, 72), Image.Resampling.LANCZOS)
+                    image.alpha_composite(emblem_icon, (300, meta_y + 16))
+            except Exception as exc:
+                log.info("Source emblem icon unavailable: %s", exc)
+    if build.get("battle_spell_names"):
+        draw.text((520, meta_y), "БОЕВЫЕ ЗАКЛИНАНИЯ", font=font(16, True), fill=accent)
+        draw.text((520, meta_y + 28), str(build["battle_spell_names"])[:60], font=font(23, True), fill="#FFFFFF")
 
     draw.text((70, 1125), f"Данные обновлены: {str(build['verified_at'])[:10]}", font=font(20, True), fill="#FFFFFF")
     draw.text((70, 1165), "Сверяйся с текущим патчем перед матчем.", font=font(19), fill=(220, 220, 238, 230))
@@ -591,6 +641,10 @@ def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
                 "verification_method": "MLBBDex current API + exact item-catalog match",
                 "source_build_name": str(source_build.get("name") or "Build"),
                 "context": str(source_build.get("context") or ""),
+                "emblem_name": next((source_text_value(source_build.get(k)) for k in ("emblem", "emblem_name", "emblem_build", "emblems") if source_text_value(source_build.get(k))), ""),
+                "emblem_image_url": next((source_image_value(source_build.get(k)) for k in ("emblem", "emblem_build", "emblems") if source_image_value(source_build.get(k))), ""),
+                "battle_spell_names": next((source_text_value(source_build.get(k)) for k in ("battle_spells", "battle_spell", "spells", "spell") if source_text_value(source_build.get(k))), ""),
+                "battle_spell_image_urls": [source_image_value(source_build.get(k)) for k in ("battle_spells", "battle_spell", "spells", "spell") if source_image_value(source_build.get(k))],
                 "items": resolved,
                 "attribution": "Game data from Mobile Legends Wiki (CC BY-SA) via MLBBDex; build analysis from MLBBDex.",
             }
@@ -619,7 +673,9 @@ def build_caption(build: dict[str, Any]) -> str:
         f"⚔️ {build['hero']} — сборка предметов\n"
         f"Патч: {build['patch_version']}\n\n"
         f"{names}\n\n"
-        f"Данные сборки: {build.get('context') or build.get('source_build_name', 'рекомендация источника')}\n"
+        + (f"🧬 Эмблема: {build['emblem_name']}\n" if build.get("emblem_name") else "")
+        + (f"⚡ Боевые заклинания: {build['battle_spell_names']}\n" if build.get("battle_spell_names") else "")
+        + f"\nДанные сборки: {build.get('context') or build.get('source_build_name', 'рекомендация источника')}\n"
         f"Источник: {build['source_url']}\n"
         f"{build.get('attribution', 'Источник данных указан по ссылке.')}\n\n"
         "#MobileLegends #MLBB #Mobalistic"
