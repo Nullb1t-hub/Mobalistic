@@ -399,10 +399,15 @@ def telegram_send_message(text: str) -> None:
         json={"chat_id": CHANNEL_ID, "text": text[:4000], "parse_mode": "HTML", "disable_web_page_preview": True},
         timeout=45,
     )
-    response.raise_for_status()
-    result = response.json()
-    if not result.get("ok"):
-        raise RuntimeError("Telegram API did not confirm sendMessage")
+    try:
+        result = response.json()
+    except ValueError:
+        response.raise_for_status()
+        raise RuntimeError("Telegram sendMessage returned a non-JSON response")
+    if response.status_code >= 400 or not result.get("ok"):
+        # Telegram's description tells us whether the chat ID, permissions, or HTML is invalid.
+        description = str(result.get("description", response.text))[:500]
+        raise RuntimeError(f"Telegram sendMessage failed (HTTP {response.status_code}): {description}")
 
 def telegram_send_photo(image_path: Path) -> None:
     """Send the artwork as a separate image, with no text embedded in its caption."""
