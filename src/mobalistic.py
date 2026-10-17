@@ -534,46 +534,56 @@ def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None
 
 def create_hero_build_poster(cfg: dict[str, Any], hero: str, hero_image_url: str, build_label: str,
                              emblem_text: str, talent_text: str, spell_text: str) -> Path | None:
-    """Use actual hero artwork with a clean build-info strip; no generated/fake hero art."""
+    """Create a polished editorial meta card from real splash artwork; no AI image service needed."""
     artwork = article_image(hero_image_url) if hero_image_url else None
     if artwork is None:
-        log.warning("No real hero artwork available for %s; skip hero build poster", hero)
+        log.warning("No genuine splash artwork available for %s; skip hero build poster", hero)
         return None
     width, height = 1080, 1350
-    scale = max(width / artwork.width, 930 / artwork.height)
-    artwork = artwork.resize((int(artwork.width * scale), int(artwork.height * scale)), Image.Resampling.LANCZOS)
-    left = max(0, (artwork.width - width) // 2)
-    top = max(0, (artwork.height - 930) // 2)
-    artwork = artwork.crop((left, top, left + width, top + 930)).convert("RGBA")
-    # Soft darkening keeps the original game artwork recognizable and text legible.
-    shade = Image.new("RGBA", artwork.size, (7, 9, 18, 72))
-    image = Image.alpha_composite(artwork, shade)
-    panel = Image.new("RGBA", (width, height - 860), (10, 12, 22, 255))
-    image.alpha_composite(panel, (0, 860))
-    draw = ImageDraw.Draw(image, "RGBA")
     brand = cfg.get("brand", {})
-    accent = brand.get("accent", "#A78BFA")
-    draw.rounded_rectangle((54, 48, 330, 100), radius=22, fill=(8, 10, 20, 200), outline=(255,255,255,65), width=1)
-    draw.text((76, 61), "MOBALISTIC  /  MLBB", font=font(21, True), fill="#FFFFFF")
-    draw.rounded_rectangle((54, 770, 480, 826), radius=24, fill=accent)
-    draw.text((78, 784), build_label.upper(), font=font(22, True), fill="#11121B")
-    draw.text((58, 892), hero.upper(), font=font(57, True), fill="#FFFFFF")
-    draw.text((60, 970), "ЧТО ЧАЩЕ БЕРУТ ИГРОКИ", font=font(20, True), fill=accent)
+    accent_hex = brand.get("accent", "#A78BFA")
+    accent = tuple(int(accent_hex[i:i+2], 16) for i in (1, 3, 5))
+    scale = max(width / artwork.width, height / artwork.height)
+    artwork = artwork.resize((int(artwork.width * scale), int(artwork.height * scale)), Image.Resampling.LANCZOS)
+    left, top = (artwork.width - width) // 2, (artwork.height - height) // 2
+    art = artwork.crop((left, top, left + width, top + height)).convert("RGBA")
+    art = Image.alpha_composite(art, Image.new("RGBA", (width, height), (3, 5, 14, 42)))
+    fade = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    fd = ImageDraw.Draw(fade)
+    for y in range(390, height):
+        t = (y - 390) / (height - 390)
+        fd.line((0, y, width, y), fill=(5, 7, 17, int(55 + 190 * t)))
+    art = Image.alpha_composite(art, fade)
+    draw = ImageDraw.Draw(art, "RGBA")
+    draw.rounded_rectangle((52, 48, 360, 112), radius=25, fill=(8, 10, 22, 205), outline=(255,255,255,70), width=2)
+    draw.rounded_rectangle((70, 66, 80, 94), radius=5, fill=accent + (255,))
+    draw.text((100, 63), "MOBALISTIC", font=font(25, True), fill="#FFFFFF")
+    draw.rounded_rectangle((770, 58, 1028, 108), radius=20, fill=accent + (240,))
+    draw.text((795, 72), "COMMUNITY META", font=font(16, True), fill="#11121B")
+    draw.text((58, 720), "HERO BUILD  /  #01", font=font(21, True), fill=accent + (255,))
+    draw.text((52, 755), hero.upper(), font=font(94, True), fill="#FFFFFF", stroke_width=2, stroke_fill=(0,0,0,100))
+    draw.text((60, 865), "WHAT PLAYERS PICK MOST", font=font(21, True), fill=(235,238,255,245))
+    draw.line((60, 908, 1020, 908), fill=(255,255,255,90), width=2)
     rows = [
-        ("ЭМБЛЕМА", emblem_text),
-        ("ТАЛАНТ", talent_text),
-        ("ЗАКЛИНАНИЕ", spell_text),
+        ("EMBLEM", emblem_text, 21 / 43, "49%"),
+        ("TALENT", talent_text, 27 / 43, "63%"),
+        ("BATTLE SPELL", spell_text, 0.49, "49%"),
     ]
-    y = 1020
-    for label, value in rows:
-        draw.rounded_rectangle((58, y, 1022, y + 78), radius=18, fill=(255,255,255,12), outline=(255,255,255,30), width=1)
-        draw.text((82, y + 12), label, font=font(15, True), fill=accent)
-        draw.text((300, y + 20), value[:50], font=font(23, True), fill="#FFFFFF")
-        y += 88
-    draw.text((60, 1300), "ЧАСТОТА ВЫБОРА ≠ ГАРАНТИЯ ПОБЕДЫ", font=font(15, True), fill=(220,222,238,210))
+    y = 938
+    for label, value, ratio, pct in rows:
+        draw.rounded_rectangle((56, y, 1024, y + 92), radius=20, fill=(10, 12, 27, 205), outline=(255,255,255,48), width=2)
+        draw.text((82, y + 13), label, font=font(15, True), fill=accent + (255,))
+        draw.text((82, y + 40), value, font=font(25, True), fill="#FFFFFF")
+        bx1, by1, bx2, by2 = 770, y + 54, 930, y + 67
+        draw.rounded_rectangle((bx1, by1, bx2, by2), radius=6, fill=(255,255,255,38))
+        draw.rounded_rectangle((bx1, by1, bx1 + int((bx2-bx1)*ratio), by2), radius=6, fill=accent + (255,))
+        draw.text((944, y + 45), pct, font=font(18, True), fill="#FFFFFF")
+        y += 101
+    draw.rounded_rectangle((58, 1262, 1022, 1318), radius=18, fill=(8,10,22,220), outline=(255,255,255,38), width=1)
+    draw.text((80, 1278), "PICK RATE IS NOT WIN RATE  /  ADAPT TO MATCHUP", font=font(15, True), fill=(230,232,245,245))
     DRAFTS.mkdir(parents=True, exist_ok=True)
-    out = DRAFTS / f"hero-build-{re.sub(r'[^a-zA-Z0-9_-]+', '-', hero.lower())}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.jpg"
-    image.convert("RGB").save(out, "JPEG", quality=92, optimize=True)
+    out = DRAFTS / f"hero-build-{re.sub(r'[^a-zA-Z0-9_-]+', '-', hero.lower())}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')}.jpg"
+    art.convert("RGB").save(out, "JPEG", quality=94, optimize=True)
     return out
 
 def telegram_send_photo(image_path: Path, caption: str) -> None:
@@ -745,6 +755,7 @@ def build_caption(build: dict[str, Any]) -> str:
 
 SEED_SOURCE_URL = "https://mlbb.io/tl/hero/argus/build"
 SEED_POSTER_V2_KEY = "seed:argus-poster-v2"
+SEED_POSTER_V3_KEY = "seed:argus-poster-v3"
 SEED_CAPTION = (
     "<b>Аргус — сборка #1: что чаще берут</b>\n\n"
     "Залетел посмотреть, что собирают на Аргуса: в выборке из 43 сборок чаще всего стоят Marksman и War Cry. "
