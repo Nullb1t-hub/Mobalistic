@@ -370,6 +370,20 @@ def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publis
     image.convert("RGB").save(out, "JPEG", quality=91, optimize=True)
     return out
 
+def image_url_from_hero(data: dict[str, Any]) -> str:
+    """Return a hero artwork URL only when the upstream API explicitly provides one."""
+    keys = ("splash_art", "splashArt", "artwork_url", "artwork", "portrait_url", "portrait", "image_url", "image", "icon_url", "icon", "cover_url", "cover")
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, str) and value.startswith("https://"):
+            return value
+        if isinstance(value, dict):
+            for nested_key in ("url", "src", "large", "original"):
+                nested = value.get(nested_key)
+                if isinstance(nested, str) and nested.startswith("https://"):
+                    return nested
+    return ""
+
 def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None:
     # Fail closed: never render/publish an unverified or incomplete build.
     required = ("hero", "patch_version", "source_url", "verified_at", "items")
@@ -406,6 +420,25 @@ def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None
     draw.text((92, 203), f"СБОРКА  /  {build['patch_version']}", font=font(18, True), fill="#10111A")
     draw.text((70, 280), str(build["hero"]).upper(), font=font(66, True), fill="#FFFFFF")
     draw.text((72, 365), "6 ПРЕДМЕТОВ  •  ПОРЯДОК ПО СХЕМЕ", font=font(20, True), fill=accent)
+
+    # Use upstream hero artwork when the data provider exposes it; never guess an asset URL.
+    hero_url = str(build.get("hero_image_url", ""))
+    if hero_url.startswith("https://"):
+        try:
+            response = requests.get(hero_url, timeout=REQUEST_TIMEOUT, headers={"User-Agent": "MobalisticBot/1.0"})
+            response.raise_for_status()
+            if len(response.content) <= 5_000_000 and response.headers.get("Content-Type", "").lower().startswith("image/"):
+                from io import BytesIO
+                hero_art = Image.open(BytesIO(response.content)).convert("RGBA")
+                hero_art.thumbnail((300, 245), Image.Resampling.LANCZOS)
+                hero_x, hero_y = 700, 180
+                panel = Image.new("RGBA", (320, 270), (20, 22, 39, 235))
+                panel.alpha_composite(hero_art, ((320 - hero_art.width) // 2, (270 - hero_art.height) // 2))
+                image.paste(panel.convert("RGB"), (690, 170))
+                draw = ImageDraw.Draw(image, "RGBA")
+                draw.rounded_rectangle((690, 170, 1010, 440), radius=24, outline=(167, 139, 250, 180), width=2)
+        except Exception as exc:
+            log.info("Hero artwork unavailable for %s: %s", build.get("hero"), exc)
 
     start_x, start_y = 70, 430
     cell_w, cell_h, gap_x, gap_y = 300, 205, 28, 22
@@ -542,6 +575,7 @@ def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
             source_url = f"{MLBBDEX_SITE}/en/heroes/{hero['slug']}"
             build = {
                 "hero": str(detail.get("name") or hero["name"]),
+                "hero_image_url": image_url_from_hero(detail) or image_url_from_hero(hero),
                 "patch_version": patch_version,
                 "source_url": source_url,
                 "verified_at": datetime.now(timezone.utc).date().isoformat(),
