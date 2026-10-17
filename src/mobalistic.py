@@ -195,33 +195,24 @@ def gemini_text(prompt: str) -> str:
     return answer
 
 def generate_ai_artwork(prompt: str) -> Image.Image | None:
-    """Try a free-tier Hugging Face image inference endpoint; never break publishing if unavailable."""
+    """Generate art through Hugging Face's current Inference Providers router."""
     if not HF_TOKEN:
         return None
-    endpoint = "https://router.huggingface.co/hf-inference/models/" + HF_IMAGE_MODEL
     try:
-        response = requests.post(
-            endpoint,
-            headers={"Authorization": f"Bearer {HF_TOKEN}", "Accept": "image/*"},
-            json={"inputs": prompt},
-            timeout=90,
-        )
-        response.raise_for_status()
-        content_type = response.headers.get("Content-Type", "").lower()
-        if not content_type.startswith("image/") or not response.content:
-            log.warning("AI image endpoint returned a non-image response; using verified artwork instead")
-            return None
-        from io import BytesIO
-        image = Image.open(BytesIO(response.content)).convert("RGB")
+        # FLUX.1-schnell is routed through Fal AI; the legacy hf-inference
+        # provider endpoint returns 410 for this model.
+        from huggingface_hub import InferenceClient
+        client = InferenceClient(provider="fal-ai", api_key=HF_TOKEN, timeout=90)
+        image = client.text_to_image(prompt=prompt, model=HF_IMAGE_MODEL)
+        image = image.convert("RGB")
         if image.width < 512 or image.height < 512:
-            log.warning("AI image endpoint returned an unexpectedly small image")
+            log.warning("AI image provider returned an unexpectedly small image")
             return None
-        log.info("AI artwork generated using Hugging Face model %s", HF_IMAGE_MODEL)
+        log.info("AI artwork generated using Hugging Face Inference Providers (fal-ai), model %s", HF_IMAGE_MODEL)
         return image
     except Exception as exc:
-        log.warning("AI image generation unavailable (free-tier quota/model may be limited): %s", exc)
+        log.warning("AI image generation unavailable (provider access/quota may be limited): %s", exc)
         return None
-
 
 def art_prompt(category: str, title: str, hero: str = "") -> str:
     subject = f"Mobile Legends hero {hero}" if hero else f"Mobile Legends Bang Bang editorial topic: {title}"
