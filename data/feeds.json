@@ -1,7 +1,7 @@
 {
   "brand": {
     "name": "MOBALISTIC",
-    "tagline": "ИГРАЙ УМНЕЕ",
+    "tagline": "МЕТА. ГАЙДЫ. ПОБЕДЫ.",
     "accent": "#A78BFA",
     "background": "#0B0D16",
     "panel": "#171A2B"
@@ -40,11 +40,10 @@
     "moonton"
   ],
   "category_weights": {
-    "builds": 50,
-    "guides": 20,
+    "builds": 45,
+    "guides": 25,
     "news": 15,
     "esports": 10,
-    "memes": 10,
     "hot_topic": 5
   }
 }
