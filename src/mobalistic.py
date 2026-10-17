@@ -405,15 +405,10 @@ def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publis
     brand = cfg.get("brand", {})
     accent = brand.get("accent", "#A78BFA")
     base = brand.get("background", "#0B0D16")
-    # AI-generated cinematic artwork is preferred; use real source art if free inference is unavailable.
+    # Editorial art must be original AI artwork. Do not repost open-web/source images as a visual substitute.
     artwork = generate_ai_artwork(art_prompt(category, title, hero=hero))
-    if artwork is None and image_url:
-        artwork = article_image(image_url)
-    if artwork is None and source_url:
-        artwork = article_image(source_url)
-    # Never publish a generic template when neither AI art nor genuine source art is available.
     if artwork is None:
-        log.info("Skipping editorial item: neither AI nor genuine source artwork is available: %s", title)
+        log.info("Skipping editorial item: original AI artwork is unavailable; source images are intentionally not reused: %s", title)
         return None
     if artwork is not None:
         scale = max(width / artwork.width, height / artwork.height)
@@ -538,24 +533,17 @@ def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None
     draw.text((70, 280), str(build["hero"]).upper(), font=font(66, True), fill="#FFFFFF")
     draw.text((72, 365), "6 ПРЕДМЕТОВ  •  ПОРЯДОК ПО СХЕМЕ", font=font(20, True), fill=accent)
 
-    # Use upstream hero artwork when the data provider exposes it; never guess an asset URL.
-    hero_url = str(build.get("hero_image_url", ""))
-    if hero_url.startswith("https://"):
-        try:
-            response = requests.get(hero_url, timeout=REQUEST_TIMEOUT, headers={"User-Agent": "MobalisticBot/1.0"})
-            response.raise_for_status()
-            if len(response.content) <= 5_000_000 and response.headers.get("Content-Type", "").lower().startswith("image/"):
-                from io import BytesIO
-                hero_art = Image.open(BytesIO(response.content)).convert("RGBA")
-                hero_art.thumbnail((300, 245), Image.Resampling.LANCZOS)
-                hero_x, hero_y = 700, 180
-                panel = Image.new("RGBA", (320, 270), (20, 22, 39, 235))
-                panel.alpha_composite(hero_art, ((320 - hero_art.width) // 2, (270 - hero_art.height) // 2))
-                image.paste(panel.convert("RGB"), (690, 170))
-                draw = ImageDraw.Draw(image, "RGBA")
-                draw.rounded_rectangle((690, 170, 1010, 440), radius=24, outline=(167, 139, 250, 180), width=2)
-        except Exception as exc:
-            log.info("Hero artwork unavailable for %s: %s", build.get("hero"), exc)
+    # Try original AI key art for the hero header. If generation is unavailable, keep the clean
+    # build infographic and exact item icons; do not substitute an unrelated/open-web hero image.
+    hero_art = generate_ai_artwork(art_prompt("builds", f"{build['hero']} hero build", str(build["hero"])))
+    if hero_art is not None:
+        hero_art = hero_art.convert("RGBA")
+        hero_art.thumbnail((320, 270), Image.Resampling.LANCZOS)
+        panel = Image.new("RGBA", (320, 270), (20, 22, 39, 235))
+        panel.alpha_composite(hero_art, ((320 - hero_art.width) // 2, (270 - hero_art.height) // 2))
+        image.paste(panel.convert("RGB"), (690, 170))
+        draw = ImageDraw.Draw(image, "RGBA")
+        draw.rounded_rectangle((690, 170, 1010, 440), radius=24, outline=(167, 139, 250, 180), width=2)
 
     start_x, start_y = 70, 430
     cell_w, cell_h, gap_x, gap_y = 300, 205, 28, 22
