@@ -813,7 +813,7 @@ def main() -> int:
 
     # One-time exception: publish only the redesigned Argus card once for the user to review.
     # Once its dedicated key is recorded after Telegram confirms delivery, the normal 4-hour cooldown applies.
-    force_seed_only = PUBLISH_ENABLED and SEED_POSTER_V2_KEY not in published
+    force_seed_only = PUBLISH_ENABLED and SEED_POSTER_V3_KEY not in published
     last_post_raw = str(state.get("last_post_at", "")).strip()
     if PUBLISH_ENABLED and last_post_raw and not force_seed_only:
         try:
