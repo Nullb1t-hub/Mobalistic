@@ -71,14 +71,16 @@ class MobalisticCoreTests(unittest.TestCase):
     def test_publication_is_capped_at_one_per_run(self):
         self.assertEqual(agent.MAX_POSTS_PER_RUN, 1)
 
-    def test_editorial_image_is_not_generated_without_real_artwork(self):
-        with patch.object(agent, "article_image", return_value=None):
+    def test_editorial_post_skips_instead_of_reusing_open_web_images(self):
+        with patch.object(agent, "generate_ai_artwork", return_value=None), patch.object(agent, "article_image") as source_art:
             result = agent.create_editorial_card(
                 {"brand":{"accent":"#A78BFA","background":"#0B0D16"}},
                 "news", "Тестовый заголовок", "ONE Esports",
-                source_url="https://example.com/article"
+                source_url="https://example.com/article",
+                image_url="https://example.com/source-image.jpg",
             )
         self.assertIsNone(result)
+        source_art.assert_not_called()
 
 
     def test_google_news_artwork_is_rejected(self):
