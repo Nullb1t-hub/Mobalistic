@@ -180,13 +180,17 @@ def gemini_text(prompt: str) -> str:
 def make_caption(item: Candidate) -> str | None:
     prompt = f"""
 Ты — редактор канала MOBALISTIC о Mobile Legends: Bang Bang.
-Пиши на русском естественно, как опытный игрок, без канцелярита и без фраз «как ИИ».
-Не придумывай факты, числа, даты, результаты матчей, патчи, цитаты, статистику или предметы.
-Используй только предоставленные ниже заголовок и краткое описание. Если фактов мало или материал не относится к MLBB, ответь ровно SKIP.
-Сделай полезный пост: цепляющий короткий заголовок, 2–4 коротких абзаца, уместный игровой сленг, максимум 3 эмодзи.
-Не утверждай, что сборка метовая или профессиональная, если источник этого не доказывает.
-Не копируй описание дословно. В конце отдельной строкой укажи «Источник: {item.url}».
-Максимум 850 символов до ссылки.
+Пиши ТОЛЬКО на русском, живо и по-человечески — как свой игрок из MLBB-комьюнити, а не новостной сайт и не нейросеть.
+Главное: меньше воды, больше сути. Не начинай с «В мире Mobile Legends», «Стало известно», «Игроки смогут» и других канцелярских вступлений.
+Не выдумывай факты, цифры, даты, патчи, награды, результаты или цитаты. Используй только сведения из заголовка и описания. Если это не про MLBB или фактов недостаточно — ответь ровно SKIP.
+Формат Telegram-поста:
+<b>Короткий цепляющий заголовок по-русски</b>
+
+1 короткая фраза: что произошло и почему это интересно.
+
+Ещё 1–3 коротких абзаца по делу: конкретика, полезный вывод или вопрос к игрокам. Разговорный стиль, уместный игровой сленг, 1–3 эмодзи. Не пересказывай одно и то же разными словами.
+В конце — короткая строка «🔗 <a href="{item.url}">Источник</a>».
+Используй только HTML-теги Telegram <b>, <i>, <a>. Не используй Markdown, таблицы, длинные списки и заголовки капсом. Максимум 750 символов, без учёта HTML-разметки.
 
 Рубрика: {CATEGORY_LABELS.get(item.category, "MLBB")}
 Издатель: {item.publisher}
@@ -385,14 +389,30 @@ def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None
     image.save(out, "PNG", optimize=True)
     return out
 
-def telegram_send_photo(image_path: Path, caption: str) -> None:
+def telegram_send_message(text: str) -> None:
+    """Send the actual editorial post as a standalone Telegram message."""
+    if not BOT_TOKEN or not CHANNEL_ID:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID are required to publish")
+    endpoint = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    response = requests.post(
+        endpoint,
+        json={"chat_id": CHANNEL_ID, "text": text[:4000], "parse_mode": "HTML", "disable_web_page_preview": True},
+        timeout=45,
+    )
+    response.raise_for_status()
+    result = response.json()
+    if not result.get("ok"):
+        raise RuntimeError("Telegram API did not confirm sendMessage")
+
+def telegram_send_photo(image_path: Path) -> None:
+    """Send the artwork as a separate image, with no text embedded in its caption."""
     if not BOT_TOKEN or not CHANNEL_ID:
         raise RuntimeError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID are required to publish")
     endpoint = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
     with image_path.open("rb") as photo:
         response = requests.post(
             endpoint,
-            data={"chat_id": CHANNEL_ID, "caption": caption[:1024]},
+            data={"chat_id": CHANNEL_ID},
             files={"photo": (image_path.name, photo, "image/png")},
             timeout=45,
         )
@@ -404,10 +424,10 @@ def telegram_send_photo(image_path: Path, caption: str) -> None:
 def record_preview(image_path: Path, caption: str, category: str) -> None:
     preview_path = image_path.with_suffix(".txt")
     preview_path.write_text(
-        f"CATEGORY: {category}\nPUBLISH_ENABLED: false\n\n{caption}\n",
+        f"CATEGORY: {category}\nPUBLISH_ENABLED: false\nTELEGRAM_LAYOUT: text message first, image as separate attachment\n\nPOST TEXT:\n{caption}\n\nIMAGE FILE: {image_path.name}\n",
         encoding="utf-8",
     )
-    log.info("PREVIEW ONLY — category=%s image=%s caption=%s", category, image_path, caption.replace("\n", " | "))
+    log.info("PREVIEW ONLY — category=%s image=%s post_text=%s", category, image_path, caption.replace("\n", " | "))
 
 MLBBDEX_API = "https://mlbbdex.com/api/v1"
 MLBBDEX_SITE = "https://mlbbdex.com"
@@ -634,14 +654,19 @@ def main() -> int:
             used_urls.add(selected_candidate.url)
             if not caption:
                 continue
-            image_path = create_editorial_card(cfg, category, selected_candidate.title, selected_candidate.publisher)
+            # Use the AI-written Russian headline on the image, not the English RSS headline.
+            image_title = re.sub(r"<[^>]+>", "", caption.splitlines()[0]).strip()[:110]
+            image_title = html.unescape(image_title) or selected_candidate.title
+            image_path = create_editorial_card(cfg, category, image_title, selected_candidate.publisher)
             source_key = selected_candidate.url
 
         if image_path is None or not caption:
             continue
         if PUBLISH_ENABLED:
             try:
-                telegram_send_photo(image_path, caption)
+                # The readable post goes into Telegram as text. The image is only an attachment.
+                telegram_send_message(caption)
+                telegram_send_photo(image_path)
             except Exception:
                 log.exception("Telegram publication failed; state was not advanced")
                 return 3
