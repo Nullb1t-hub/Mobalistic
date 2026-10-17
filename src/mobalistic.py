@@ -699,7 +699,7 @@ def canonical_item_name(value: str) -> str:
     return name
 
 def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
-    """Fetch one source-backed build per run; rotate heroes and never invent item names."""
+    """Discover a fresh source-backed build from the live API, rotating across heroes."""
     try:
         heroes_payload = mlbbdex_get("heroes")
         items_payload = mlbbdex_get("items")
@@ -711,7 +711,10 @@ def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
             log.warning("MLBBDex returned incomplete hero/item/patch data")
             return None
 
-        item_by_name = {canonical_item_name(item.get("name", "")): item for item in items if item.get("name") and item.get("slug")}
+        item_by_name = {
+            canonical_item_name(str(item.get("name", ""))): item
+            for item in items if isinstance(item, dict) and item.get("name") and item.get("slug")
+        }
         patch = patches[0] if isinstance(patches[0], dict) else {}
         patch_version = next(
             (str(patch.get(key)).strip() for key in ("version", "name", "patch", "number", "slug")
@@ -725,72 +728,86 @@ def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
         heroes = [h for h in heroes if isinstance(h, dict) and h.get("slug") and h.get("name")]
         if not heroes:
             return None
-        # Argus gets the first pass; then rotate alphabetically through the rest.
-        heroes.sort(key=lambda h: (normalise(h["name"]) != "argus", normalise(h["name"])))
+        heroes.sort(key=lambda h: (normalise(str(h["name"])) != "argus", normalise(str(h["name"]))))
         cursor = int(state.get("build_cursor", 0)) % len(heroes)
-        hero = heroes[cursor]
-        detail_payload = mlbbdex_get(f"heroes/{quote(str(hero['slug']))}")
-        detail = detail_payload.get("data", {})
-        builds = detail.get("builds", [])
-        if not isinstance(builds, list) or not builds:
-            attempts = int(state.get("_build_attempts", 0))
-            log.info("No source build currently available for %s; trying next hero (%s/8)", hero["name"], attempts + 1)
-            if attempts >= min(7, len(heroes) - 1):
-                state.pop("_build_attempts", None)
-                return None
-            state["build_cursor"] = (cursor + 1) % len(heroes)
-            state["_build_attempts"] = attempts + 1
-            return discover_one_source_build(state)
+        scan_count = min(8, len(heroes))
+        published = set(state.get("published", []))
 
-        for source_build in builds:
-            names = source_build.get("items", []) if isinstance(source_build, dict) else []
-            if len(names) != 6:
+        for offset in range(scan_count):
+            hero_index = (cursor + offset) % len(heroes)
+            hero = heroes[hero_index]
+            try:
+                detail_payload = mlbbdex_get(f"heroes/{quote(str(hero['slug']))}")
+            except Exception as exc:
+                log.warning("Could not load build data for %s: %s", hero["name"], exc)
                 continue
-            resolved = []
-            for name in names:
-                item = item_by_name.get(canonical_item_name(str(name)))
-                if not item:
-                    resolved = []
-                    break
-                slug = str(item["slug"])
-                resolved.append({
-                    "name": str(item["name"]),
-                    "image_url": image_url_from_hero(item),
-                })
-            if len(resolved) != 6:
-                log.warning("Skipping %s build: item catalog could not resolve all six icons", hero["name"])
+            detail = detail_payload.get("data", {})
+            source_builds = detail.get("builds", [])
+            if not isinstance(source_builds, list) or not source_builds:
                 continue
-            source_url = f"{MLBBDEX_SITE}/en/heroes/{hero['slug']}"
-            build = {
-                "hero": str(detail.get("name") or hero["name"]),
-                "hero_image_url": image_url_from_hero(detail) or image_url_from_hero(hero),
-                "patch_version": patch_version,
-                "source_url": source_url,
-                "verified_at": datetime.now(timezone.utc).date().isoformat(),
-                "verified": True,
-                "verification_method": "MLBBDex current API + exact item-catalog match",
-                "source_build_name": str(source_build.get("name") or "Build"),
-                "context": str(source_build.get("context") or ""),
-                "emblem_name": next((source_text_value(source_build.get(k)) for k in ("emblem", "emblem_name", "emblem_build", "emblems") if source_text_value(source_build.get(k))), ""),
-                "emblem_image_url": next((source_image_value(source_build.get(k)) for k in ("emblem", "emblem_build", "emblems") if source_image_value(source_build.get(k))), ""),
-                "battle_spell_names": next((source_text_value(source_build.get(k)) for k in ("battle_spells", "battle_spell", "spells", "spell") if source_text_value(source_build.get(k))), ""),
-                "battle_spell_image_urls": [source_image_value(source_build.get(k)) for k in ("battle_spells", "battle_spell", "spells", "spell") if source_image_value(source_build.get(k))],
-                "items": resolved,
-                "attribution": "Game data from Mobile Legends Wiki (CC BY-SA) via MLBBDex; build analysis from MLBBDex.",
-            }
-            key = f"build:{build['hero']}:{patch_version}:{source_build.get('name', 'Build')}"
-            if key not in set(state.get("published", [])):
-                state.pop("_build_attempts", None)
-                state["build_cursor"] = cursor
+
+            for source_build in source_builds:
+                if not isinstance(source_build, dict):
+                    continue
+                names = source_build.get("items", [])
+                if not isinstance(names, list) or len(names) != 6:
+                    continue
+                resolved = []
+                for raw_name in names:
+                    item = item_by_name.get(canonical_item_name(str(raw_name)))
+                    if not item:
+                        resolved = []
+                        break
+                    icon_url = image_url_from_hero(item)
+                    if not icon_url:
+                        resolved = []
+                        break
+                    resolved.append({"name": str(item["name"]), "image_url": icon_url})
+                if len(resolved) != 6:
+                    log.info("Skipping %s build: catalog did not resolve all six item icons", hero["name"])
+                    continue
+
+                source_url = f"{MLBBDEX_SITE}/en/heroes/{hero['slug']}"
+                build_name = str(source_build.get("name") or "Build")
+                build = {
+                    "hero": str(detail.get("name") or hero["name"]),
+                    "hero_image_url": image_url_from_hero(detail) or image_url_from_hero(hero),
+                    "patch_version": patch_version,
+                    "source_url": source_url,
+                    "verified_at": datetime.now(timezone.utc).date().isoformat(),
+                    "verified": True,
+                    "verification_method": "MLBBDex live API + exact six-item catalog match",
+                    "source_build_name": build_name,
+                    "context": "",
+                    "emblem_name": next(
+                        (source_text_value(source_build.get(k)) for k in ("emblem", "emblem_name", "emblem_build", "emblems")
+                         if source_text_value(source_build.get(k))), ""
+                    ),
+                    "emblem_image_url": next(
+                        (source_image_value(source_build.get(k)) for k in ("emblem", "emblem_build", "emblems")
+                         if source_image_value(source_build.get(k))), ""
+                    ),
+                    "battle_spell_names": next(
+                        (source_text_value(source_build.get(k)) for k in ("battle_spells", "battle_spell", "spells", "spell")
+                         if source_text_value(source_build.get(k))), ""
+                    ),
+                    "battle_spell_image_urls": [
+                        source_image_value(source_build.get(k))
+                        for k in ("battle_spells", "battle_spell", "spells", "spell")
+                        if source_image_value(source_build.get(k))
+                    ],
+                    "items": resolved,
+                    "attribution": "Build data from MLBBDex; item and patch details are linked to the source.",
+                }
+                key = f"build:{build['hero']}:{patch_version}:{build_name}"
+                if key in published or f"build:{build['hero']}:{patch_version}" in published:
+                    continue
+                state["build_cursor"] = hero_index
+                log.info("Live build discovery found %s / %s / patch %s", build["hero"], build_name, patch_version)
                 return build
-        # Advance past heroes whose source builds are already published, so the agent rotates.
-        attempts = int(state.get("_build_attempts", 0))
-        if attempts < min(7, len(heroes) - 1):
-            state["build_cursor"] = (cursor + 1) % len(heroes)
-            state["_build_attempts"] = attempts + 1
-            return discover_one_source_build(state)
-        state.pop("_build_attempts", None)
-        log.info("No unpublished source-backed build found in this hero scan window.")
+
+        state["build_cursor"] = (cursor + scan_count) % len(heroes)
+        log.info("No unpublished verified build found across %s heroes this run.", scan_count)
         return None
     except Exception as exc:
         log.warning("MLBBDex live build discovery unavailable; checking reviewed fallback registry: %s", exc)
