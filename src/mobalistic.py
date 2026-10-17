@@ -783,9 +783,17 @@ def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
                 state.pop("_build_attempts", None)
                 state["build_cursor"] = cursor
                 return build
+        # Advance past heroes whose source builds are already published, so the agent rotates.
+        attempts = int(state.get("_build_attempts", 0))
+        if attempts < min(7, len(heroes) - 1):
+            state["build_cursor"] = (cursor + 1) % len(heroes)
+            state["_build_attempts"] = attempts + 1
+            return discover_one_source_build(state)
+        state.pop("_build_attempts", None)
+        log.info("No unpublished source-backed build found in this hero scan window.")
         return None
     except Exception as exc:
-        log.warning("MLBBDex build discovery unavailable; manual verified registry will still be used: %s", exc)
+        log.warning("MLBBDex live build discovery unavailable; checking reviewed fallback registry: %s", exc)
         return None
 
 def eligible_builds() -> list[dict[str, Any]]:
@@ -824,59 +832,6 @@ def build_caption(build: dict[str, Any]) -> str:
     ])
     caption = "\\n".join(lines)
     return caption if len(caption) <= 1024 else caption[:1000]
-
-SEED_SOURCE_URL = "https://mlbb.io/tl/hero/argus/build"
-SEED_POSTER_V2_KEY = "seed:argus-poster-v2"
-SEED_POSTER_V3_KEY = "seed:argus-poster-v3"
-LAYLA_AI_TEST_KEY = "seed:layla-ai-art-test"
-LAYLA_SOURCE_URL = "https://mobile-legends.fandom.com/wiki/Layla"
-LAYLA_CAPTION = (
-    "🎯 <b>LAYLA: главное — не отдавать дистанцию</b>\n\n"
-    "Лейла раскрывается, когда спокойно фармит и бьёт с безопасной позиции. Не забегай первой в туман и не стой на месте во время файта: дождись, пока команда покажет угрозы, и держи врагов на расстоянии.\n\n"
-    "Это базовый совет по позиционированию, не сборка и не обещание лёгкой победы.\n"
-    "🔗 <a href=\"https://mobile-legends.fandom.com/wiki/Layla\">Страница героя</a>\n\n"
-    "#Layla #LaylaGuide #MLBB #MobileLegends #Mobalistic"
-)
-
-SEED_CAPTION = (
-    "⚔️ <b>ARGUS — COMMUNITY BUILD #01</b>\n"
-    "<i>What players pick most often</i>\n\n"
-    "🧬 <b>Emblem:</b> Marksman — 21/43\n"
-    "🔥 <b>Talent:</b> War Cry — 27/43\n"
-    "⚡ <b>Battle Spell:</b> Inspire — 49%\n\n"
-    "Это срез выборов из 43 сборок, а не винрейт и не универсальная сборка. Подстраивайся под матчап и составы.\n\n"
-    "🔗 <a href=\"https://mlbb.io/tl/hero/argus/build\">Build source</a>\n\n"
-    "#Argus #ArgusBuild #MLBBBuilds #MLBB #MobileLegends #Mobalistic"
-)
-
-def curated_layla_candidate(published_urls: set[str]) -> Candidate | None:
-    """One-time Layla editorial post to verify AI artwork after token setup."""
-    if LAYLA_AI_TEST_KEY in published_urls:
-        return None
-    return Candidate(
-        url=LAYLA_SOURCE_URL,
-        title="LAYLA: главное — не отдавать дистанцию",
-        publisher="Mobalistic",
-        summary="Базовый совет по позиционированию Layla: фармить безопасно, держать дистанцию и не входить первой в туман.",
-        category="guides",
-        published_at=datetime.now(timezone.utc).isoformat(),
-        image_url="https://raw.githubusercontent.com/Sparkies01/Splash/main/Layla/Blazing%20Gun.png",
-    )
-
-def curated_seed_candidate(published_urls: set[str]) -> Candidate | None:
-    """One-time redesigned Argus build card, separate from the old starter post."""
-    if SEED_POSTER_V3_KEY in published_urls:
-        return None
-    image_url = "https://raw.githubusercontent.com/Sparkies01/Splash/main/Argus/Dark%20Angel.png"
-    return Candidate(
-        url=SEED_SOURCE_URL,
-        title="Аргус: что сейчас берут в сборках",
-        publisher="MLBB.io",
-        summary="Сводка 43 комьюнити-сборок Argus, обновлённая 17 октября 2026 года: Marksman emblem 21/43, War Cry 27/43, Inspire 49%, Petrify 23%. Это частота выбора, не винрейт.",
-        category="guides",
-        published_at=datetime.now(timezone.utc).isoformat(),
-        image_url=image_url,
-    )
 
 def select_category(cfg: dict[str, Any], available: set[str], counts: dict[str, int]) -> str | None:
     weights = cfg.get("category_weights", {})
