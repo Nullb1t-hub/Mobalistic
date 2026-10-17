@@ -305,9 +305,17 @@ def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publis
 
     # Decorative game-inspired geometric shapes, not copied game artwork.
     draw.rounded_rectangle((70, 870, 1010, 1120), radius=28, fill=(15, 17, 31, 230), outline=(167, 139, 250, 100), width=2)
-    draw.text((105, 920), "МЕТА МЕНЯЕТСЯ.", font=font(29, True), fill="#FFFFFF")
-    draw.text((105, 968), "ИГРАЙ С ГОЛОВОЙ.", font=font(29, True), fill=accent)
-    draw.text((105, 1034), "Проверяй патч • адаптируйся • побеждай", font=font(20), fill=(225, 225, 240, 230))
+    if category == "memes":
+        panel_lines = ("КОГДА РАНКЕД ПОШЁЛ НЕ ТУДА", "МЫ ВСЕ ЭТО ПРОХОДИЛИ", "MOBALISTIC • ЮМОР ПО-НАШЕМУ")
+    elif category == "news" or category == "esports" or category == "hot_topic":
+        panel_lines = ("СОБЫТИЯ ИЗ МИРА MLBB", "КОНТЕКСТ ВАЖНЕЕ СЛУХОВ", "Читай источник и следи за обновлениями")
+    elif category == "guides":
+        panel_lines = ("МЕНЬШЕ ТИЛЬТА.", "БОЛЬШЕ ОСОЗНАННЫХ РЕШЕНИЙ.", "Сохрани идею и проверь в игре")
+    else:
+        panel_lines = ("МЕТА МЕНЯЕТСЯ.", "ИГРАЙ С ГОЛОВОЙ.", "Проверяй патч • адаптируйся • побеждай")
+    draw.text((105, 920), panel_lines[0], font=font(27, True), fill="#FFFFFF")
+    draw.text((105, 968), panel_lines[1], font=font(27, True), fill=accent)
+    draw.text((105, 1034), panel_lines[2], font=font(19), fill=(225, 225, 240, 230))
     if publisher:
         source_label = publisher[:70]
         draw.text((70, 1170), "ИСТОЧНИК  /  " + source_label, font=font(17), fill=(220, 220, 238, 190))
@@ -457,7 +465,7 @@ def main() -> int:
     if builds:
         available.add("builds")
     for candidate in candidates:
-        if candidate.category in {"guides", "news", "esports"}:
+        if candidate.category in {"guides", "news", "esports", "hot_topic"}:
             available.add(candidate.category)
     if not candidates and not builds:
         log.info("No recent trusted news/build found; only an original meme may be prepared.")
@@ -470,7 +478,7 @@ def main() -> int:
         choices = {"memes"} if meme_key not in published and meme_key not in used_urls else set()
         if builds:
             choices.add("builds")
-        choices.update(c.category for c in remaining if c.category in {"guides", "news", "esports"})
+        choices.update(c.category for c in remaining if c.category in {"guides", "news", "esports", "hot_topic"})
         category = select_category(cfg, choices, counts)
         if category is None:
             break
