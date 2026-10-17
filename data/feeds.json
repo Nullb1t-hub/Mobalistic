@@ -22,6 +22,10 @@
     {
       "category": "builds",
       "query": "\"Mobile Legends\" hero build meta"
+    },
+    {
+      "category": "hot_topic",
+      "query": "\"Mobile Legends\" player announcement community trending"
     }
   ],
   "trusted_publishers": [
