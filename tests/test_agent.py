@@ -1,9 +1,11 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 from pathlib import Path
 
-from src.mobalistic import clean_html, normalise, trusted_publisher, write_json, read_json
+from src.mobalistic import clean_html, normalise, trusted_publisher, write_json, read_json, telegram_send_photo
+import src.mobalistic as agent
 
 class MobalisticCoreTests(unittest.TestCase):
     def test_normalise_collapses_whitespace_and_case(self):
@@ -26,6 +28,28 @@ class MobalisticCoreTests(unittest.TestCase):
         from src.mobalistic import BUILDS_PATH
         data = json.loads(BUILDS_PATH.read_text(encoding="utf-8"))
         self.assertEqual(data.get("builds"), [])
+
+    def test_memes_are_removed_from_editorial_config_and_engine(self):
+        from src.mobalistic import FEEDS_PATH
+        config = json.loads(FEEDS_PATH.read_text(encoding="utf-8"))
+        self.assertNotIn("memes", config.get("category_weights", {}))
+        self.assertNotIn("memes", [item.get("category") for item in config.get("searches", [])])
+        self.assertFalse(hasattr(agent, "make_meme_post"))
+
+    def test_photo_and_caption_are_sent_in_one_telegram_api_call(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {"ok": True, "result": {"message_id": 123}}
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder) / "post.jpg"
+            image.write_bytes(b"test-image")
+            with patch.object(agent, "BOT_TOKEN", "123:test-token"), patch.object(agent, "CHANNEL_ID", "@mobalistic"), patch("src.mobalistic.requests.post", return_value=response) as post:
+                telegram_send_photo(image, "<b>Заголовок</b>\nТекст поста")
+        post.assert_called_once()
+        args, kwargs = post.call_args
+        self.assertTrue(args[0].endswith("/sendPhoto"))
+        self.assertEqual(kwargs["data"]["caption"], "<b>Заголовок</b>\nТекст поста")
+        self.assertEqual(kwargs["data"]["parse_mode"], "HTML")
 
 if __name__ == "__main__":
     unittest.main()
