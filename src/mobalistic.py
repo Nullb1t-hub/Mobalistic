@@ -35,9 +35,10 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
-MAX_POSTS_PER_RUN = max(1, min(5, int(os.getenv("MAX_POSTS_PER_RUN", "2"))))
+MAX_POSTS_PER_RUN = 1  # Hard cap: never publish a burst.
 MAX_AGE_DAYS = max(1, min(14, int(os.getenv("MAX_AGE_DAYS", "7"))))
 REQUEST_TIMEOUT = 25
+MIN_POST_INTERVAL = timedelta(hours=4)
 
 CATEGORY_LABELS = {
     "builds": "СБОРКА ГЕРОЯ",
@@ -191,34 +192,37 @@ def gemini_text(prompt: str) -> str:
 
 def make_caption(item: Candidate) -> str | None:
     prompt = f"""
-Ты — редактор канала MOBALISTIC о Mobile Legends: Bang Bang.
-Пиши ТОЛЬКО на русском, живо и по-человечески — как свой игрок из MLBB-комьюнити, а не новостной сайт и не нейросеть.
-Главное: меньше воды, больше сути. Не начинай с «В мире Mobile Legends», «Стало известно», «Игроки смогут» и других канцелярских вступлений.
-Не выдумывай факты, цифры, даты, патчи, награды, результаты или цитаты. Используй только сведения из заголовка и описания. Если это не про MLBB или фактов недостаточно — ответь ровно SKIP.
-Формат Telegram-поста:
-<b>Короткий цепляющий заголовок по-русски</b>
+Ты — редактор живого русскоязычного Telegram-канала для игроков Mobile Legends: Bang Bang.
+Пиши как игрок из комьюнити, не как пресс-релиз и не как нейросеть. Если материал не о самой MLBB, нет конкретного факта, это SEO-перепечатка или данных недостаточно — ответь ровно SKIP.
+Не выдумывай факты, даты, цифры, патчи, сборки, результаты, цитаты или мнения.
+Строгий формат:
+<b>Короткий заголовок по сути</b>
 
-1 короткая фраза: что произошло и почему это интересно.
-
-Ещё 1–3 коротких абзаца по делу: конкретика, полезный вывод или вопрос к игрокам. Разговорный стиль, уместный игровой сленг, 1–3 эмодзи. Не пересказывай одно и то же разными словами.
-В конце — короткая строка «🔗 <a href="{item.url}">Источник</a>».
-Используй только HTML-теги Telegram <b>, <i>, <a>. Не используй Markdown, таблицы, длинные списки и заголовки капсом. Максимум 750 символов, без учёта HTML-разметки.
-
+1–2 коротких абзаца, всего 2–4 предложения. Сразу факт и польза/последствие для игрока. Разговорный русский, естественный сленг только к месту (катка, пик, нерф, баф), максимум 1 эмодзи. Не повторяй заголовок, не пиши вступлений и пустого вопроса в конце.
+В конце: 🔗 <a href="{item.url}">Источник</a>
+HTML: только <b>, <i>, <a>. Максимум 450 символов с HTML.
 Рубрика: {CATEGORY_LABELS.get(item.category, "MLBB")}
 Издатель: {item.publisher}
-Дата публикации источника: {item.published_at}
 Заголовок источника: {item.title}
-Описание источника: {item.summary}
+Описание: {item.summary[:900]}
 Ссылка: {item.url}
 """
     caption = gemini_text(prompt).strip()
-    if caption.upper() == "SKIP" or len(caption) < 70:
+    if caption.upper() == "SKIP" or len(clean_html(caption)) < 65:
+        return None
+    plain = normalise(clean_html(caption))
+    low_signal = (
+        "в мире mobile legends", "стало известно", "игроки смогут",
+        "это событие подчеркивает", "данный шаг", "поклонники игры",
+        "следите за обновлениями", "что думаете об этом"
+    )
+    if any(phrase in plain for phrase in low_signal):
+        return None
+    if len(clean_html(caption)) > 450 or len(caption) > 1024:
         return None
     if item.url not in caption:
-        caption = caption.rstrip() + f"\n\nИсточник: {item.url}"
-    if len(caption) > 1000:
-        caption = caption[:940].rsplit(" ", 1)[0] + f"…\n\nИсточник: {item.url}"
-    return caption
+        caption = caption.rstrip() + f'\n\n🔗 <a href="{html.escape(item.url, quote=True)}">Источник</a>'
+    return caption if len(caption) <= 1024 else None
 
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     options = [
@@ -328,6 +332,10 @@ def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publis
     accent = brand.get("accent", "#A78BFA")
     base = brand.get("background", "#0B0D16")
     artwork = article_image(image_url or source_url)
+    # No generic fake cover: skip stories without genuine publisher artwork.
+    if artwork is None:
+        log.info("Skipping editorial item without genuine artwork: %s", title)
+        return None
     if artwork is not None:
         scale = max(width / artwork.width, height / artwork.height)
         artwork = artwork.resize((int(artwork.width * scale), int(artwork.height * scale)), Image.Resampling.LANCZOS)
@@ -646,6 +654,20 @@ def main() -> int:
         log.error("GEMINI_API_KEY is missing. Add it to GitHub Actions secrets before running the content engine.")
         return 2
 
+    # Manual workflow_dispatch cannot bypass the cooldown.
+    last_post_raw = str(state.get("last_post_at", "")).strip()
+    if PUBLISH_ENABLED and last_post_raw:
+        try:
+            last_post_at = datetime.fromisoformat(last_post_raw.replace("Z", "+00:00"))
+            if last_post_at.tzinfo is None:
+                last_post_at = last_post_at.replace(tzinfo=timezone.utc)
+            wait_left = MIN_POST_INTERVAL - (datetime.now(timezone.utc) - last_post_at.astimezone(timezone.utc))
+            if wait_left.total_seconds() > 0:
+                log.info("Cooldown active; next publication allowed in about %s minutes.", int(wait_left.total_seconds() // 60))
+                return 0
+        except ValueError:
+            log.warning("Invalid last_post_at in state; cooldown cannot be evaluated.")
+
     builds = eligible_builds()
     api_build = discover_one_source_build(state)
     if api_build:
@@ -666,7 +688,7 @@ def main() -> int:
     
     posted = 0
     used_urls: set[str] = set()
-    while posted < MAX_POSTS_PER_RUN:
+    while posted < 1:  # One post maximum per run.
         remaining = [c for c in candidates if c.url not in used_urls]
         choices: set[str] = set()
         if builds:
@@ -727,6 +749,7 @@ def main() -> int:
                 log.exception("Telegram publication failed; state was not advanced")
                 return 3
             published.add(source_key)
+            state["last_post_at"] = datetime.now(timezone.utc).isoformat()
             if category == "builds" and selected.get("verification_method"):
                 state["build_cursor"] = int(state.get("build_cursor", 0)) + 1
             state["published"] = list(published)[-3000:]
