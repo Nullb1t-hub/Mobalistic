@@ -408,6 +408,98 @@ def record_preview(image_path: Path, caption: str, category: str) -> None:
     )
     log.info("PREVIEW ONLY — category=%s image=%s caption=%s", category, image_path, caption.replace("\n", " | "))
 
+MLBBDEX_API = "https://mlbbdex.com/api/v1"
+MLBBDEX_SITE = "https://mlbbdex.com"
+
+def mlbbdex_get(path: str) -> dict[str, Any]:
+    response = requests.get(
+        f"{MLBBDEX_API}/{path.lstrip('/')}",
+        timeout=REQUEST_TIMEOUT,
+        headers={"User-Agent": "MobalisticBot/1.0 (+https://mlbbdex.com/api-doc)"},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or "data" not in payload:
+        raise RuntimeError(f"Unexpected MLBBDex API response for {path}")
+    return payload
+
+def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Fetch one source-backed build per run; rotate heroes and never invent item names."""
+    try:
+        heroes_payload = mlbbdex_get("heroes")
+        items_payload = mlbbdex_get("items")
+        patches_payload = mlbbdex_get("patches")
+        heroes = heroes_payload.get("data", [])
+        items = items_payload.get("data", [])
+        patches = patches_payload.get("data", [])
+        if not heroes or not items or not patches:
+            log.warning("MLBBDex returned incomplete hero/item/patch data")
+            return None
+
+        item_by_name = {normalise(item.get("name", "")): item for item in items if item.get("name") and item.get("slug")}
+        patch = patches[0] if isinstance(patches[0], dict) else {}
+        patch_version = next(
+            (str(patch.get(key)).strip() for key in ("version", "name", "patch", "number", "slug")
+             if patch.get(key) not in (None, "")),
+            "",
+        )
+        if not patch_version:
+            log.warning("Cannot determine current patch from MLBBDex; skip build rather than guess")
+            return None
+
+        heroes = [h for h in heroes if isinstance(h, dict) and h.get("slug") and h.get("name")]
+        if not heroes:
+            return None
+        # Argus gets the first pass; then rotate alphabetically through the rest.
+        heroes.sort(key=lambda h: (normalise(h["name"]) != "argus", normalise(h["name"])))
+        cursor = int(state.get("build_cursor", 0)) % len(heroes)
+        hero = heroes[cursor]
+        detail_payload = mlbbdex_get(f"heroes/{quote(str(hero['slug']))}")
+        detail = detail_payload.get("data", {})
+        builds = detail.get("builds", [])
+        if not isinstance(builds, list) or not builds:
+            log.info("No source build currently available for %s", hero["name"])
+            return None
+
+        for source_build in builds:
+            names = source_build.get("items", []) if isinstance(source_build, dict) else []
+            if len(names) != 6:
+                continue
+            resolved = []
+            for name in names:
+                item = item_by_name.get(normalise(str(name)))
+                if not item:
+                    resolved = []
+                    break
+                slug = str(item["slug"])
+                resolved.append({
+                    "name": str(item["name"]),
+                    "image_url": f"{MLBBDEX_SITE}/visuels/objets/{slug}.webp",
+                })
+            if len(resolved) != 6:
+                log.warning("Skipping %s build: item catalog could not resolve all six icons", hero["name"])
+                continue
+            source_url = f"{MLBBDEX_SITE}/en/heroes/{hero['slug']}"
+            build = {
+                "hero": str(detail.get("name") or hero["name"]),
+                "patch_version": patch_version,
+                "source_url": source_url,
+                "verified_at": datetime.now(timezone.utc).date().isoformat(),
+                "verified": True,
+                "verification_method": "MLBBDex current API + exact item-catalog match",
+                "source_build_name": str(source_build.get("name") or "Build"),
+                "context": str(source_build.get("context") or ""),
+                "items": resolved,
+                "attribution": "Game data from Mobile Legends Wiki (CC BY-SA) via MLBBDex; build analysis from MLBBDex.",
+            }
+            key = f"build:{build['hero']}:{patch_version}:{source_build.get('name', 'Build')}"
+            if key not in set(state.get("published", [])):
+                return build
+        return None
+    except Exception as exc:
+        log.warning("MLBBDex build discovery unavailable; manual verified registry will still be used: %s", exc)
+        return None
+
 def eligible_builds() -> list[dict[str, Any]]:
     data = read_json(BUILDS_PATH, {"builds": []})
     return [
@@ -425,8 +517,9 @@ def build_caption(build: dict[str, Any]) -> str:
         f"⚔️ {build['hero']} — сборка предметов\n"
         f"Патч: {build['patch_version']}\n\n"
         f"{names}\n\n"
-        f"Проверено: {build['verified_at']}\n"
-        f"Источник: {build['source_url']}\n\n"
+        f"Данные сборки: {build.get('context') or build.get('source_build_name', 'рекомендация источника')}\n"
+        f"Источник: {build['source_url']}\n"
+        f"{build.get('attribution', 'Источник данных указан по ссылке.')}\n\n"
         "#MobileLegends #MLBB #Mobalistic"
     )[:1024]
 
@@ -460,6 +553,13 @@ def main() -> int:
         return 2
 
     builds = eligible_builds()
+    api_build = discover_one_source_build(state)
+    if api_build:
+        builds = [api_build] + [
+            b for b in builds
+            if f"build:{b.get('hero')}:{b.get('patch_version')}:{b.get('source_build_name', 'Build')}" !=
+               f"build:{api_build.get('hero')}:{api_build.get('patch_version')}:{api_build.get('source_build_name', 'Build')}"
+        ]
     candidates = collect_candidates(cfg, published)
     available: set[str] = {"memes"}
     if builds:
@@ -487,7 +587,11 @@ def main() -> int:
         caption = ""
         source_key = ""
         if category == "builds":
-            selected = next((b for b in builds if f"build:{b['hero']}:{b['patch_version']}" not in published), None)
+            selected = next((
+                b for b in builds
+                if f"build:{b['hero']}:{b['patch_version']}:{b.get('source_build_name', 'Build')}" not in published
+                and f"build:{b['hero']}:{b['patch_version']}" not in published
+            ), None)
             if selected is None:
                 builds = []
                 continue
@@ -496,7 +600,7 @@ def main() -> int:
                 builds = [b for b in builds if b is not selected]
                 continue
             caption = build_caption(selected)
-            source_key = f"build:{selected['hero']}:{selected['patch_version']}"
+            source_key = f"build:{selected['hero']}:{selected['patch_version']}:{selected.get('source_build_name', 'Build')}"
             builds = [b for b in builds if b is not selected]
         elif category == "memes":
             try:
