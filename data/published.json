@@ -1,11 +1,9 @@
 {
   "published": [
-    "meme:2026-10-17",
     "https://news.google.com/rss/articles/CBMigAFBVV95cUxNWlRuQjJBMnVDX1pLcjEwWGRRUUd2N21XeTlHUzdCZlZGeG9MSDAwNURxQlpuLVhqWnJYUGdLdVZKZTg0QXVoSlFIaXRGbS1xTE5tY3FfUUFmcUtzdkJ3bTNMVldxV1hoYl9uOGZ2X2JzSWJLblVMejdlWkw4SkFkcw?oc=5"
   ],
-  "last_category": "memes",
+  "last_category": null,
   "category_counts": {
-    "guides": 1,
-    "memes": 1
+    "guides": 1
   }
 }
