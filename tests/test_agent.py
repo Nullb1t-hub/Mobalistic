@@ -24,10 +24,17 @@ class MobalisticCoreTests(unittest.TestCase):
             write_json(path, {"published": ["url"]})
             self.assertEqual(read_json(path, {}), {"published": ["url"]})
 
-    def test_build_registry_starts_empty_to_prevent_fake_builds(self):
+    def test_build_registry_contains_only_complete_source_verified_builds(self):
         from src.mobalistic import BUILDS_PATH
         data = json.loads(BUILDS_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(data.get("builds"), [])
+        builds = data.get("builds", [])
+        self.assertGreaterEqual(len(builds), 1)
+        for build in builds:
+            self.assertTrue(build.get("verified"))
+            self.assertTrue(build.get("source_url", "").startswith("https://"))
+            self.assertTrue(build.get("patch_version"))
+            self.assertEqual(len(build.get("items", [])), 6)
+            self.assertTrue(all(item.get("name") and item.get("image_url", "").startswith("https://") for item in build["items"]))
 
     def test_memes_are_removed_from_editorial_config_and_engine(self):
         from src.mobalistic import FEEDS_PATH
