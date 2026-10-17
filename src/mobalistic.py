@@ -808,8 +808,7 @@ def eligible_builds() -> list[dict[str, Any]]:
     ]
 
 def build_caption(build: dict[str, Any]) -> str:
-    items = "\\n".join(f"{i}. {item['name']}" for i, item in enumerate(build["items"], 1))
-    context = str(build.get("context") or build.get("source_build_name") or "").strip()
+    items = "\n".join(f"{i}. {item['name']}" for i, item in enumerate(build["items"], 1))
     lines = [
         f"⚔️ <b>{html.escape(str(build['hero']))} — сборка</b>",
         f"Версия игры: <b>{html.escape(str(build['patch_version']))}</b>",
@@ -821,17 +820,17 @@ def build_caption(build: dict[str, Any]) -> str:
         lines.extend(["", f"🧬 Эмблема: <b>{html.escape(str(build['emblem_name']))}</b>"])
     if build.get("battle_spell_names"):
         lines.append(f"⚡ Заклинание: <b>{html.escape(str(build['battle_spell_names']))}</b>")
-    if context:
-        lines.extend(["", html.escape(context)])
     lines.extend([
         "",
+        "Это рекомендация источника, а не универсальная сборка: подстраивай предметы под состав соперника.",
         f"🔎 <a href=\"{html.escape(str(build['source_url']), quote=True)}\">Источник сборки</a>",
-        "Перед матчем проверь патч и подстрой предметы под состав врага.",
         "",
         "#MLBB #MobileLegends #Mobalistic",
     ])
-    caption = "\\n".join(lines)
-    return caption if len(caption) <= 1024 else caption[:1000]
+    caption = "\n".join(lines)
+    if len(caption) > 1024:
+        raise ValueError("Build caption exceeds Telegram limit")
+    return caption
 
 def select_category(cfg: dict[str, Any], available: set[str], counts: dict[str, int]) -> str | None:
     weights = cfg.get("category_weights", {})
