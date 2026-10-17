@@ -378,7 +378,7 @@ def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None
             draw.text((x + 14, text_y), line, font=item_font, fill="#FFFFFF")
             text_y += 25
 
-    draw.text((70, 1125), f"Проверено: {str(build['verified_at'])[:10]}", font=font(20, True), fill="#FFFFFF")
+    draw.text((70, 1125), f"Данные обновлены: {str(build['verified_at'])[:10]}", font=font(20, True), fill="#FFFFFF")
     draw.text((70, 1165), "Сверяйся с текущим патчем перед матчем.", font=font(19), fill=(220, 220, 238, 230))
     out = DRAFTS / f"build-{re.sub(r'[^a-zA-Z0-9_-]+', '-', str(build['hero']).lower())}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.png"
     image.save(out, "PNG", optimize=True)
