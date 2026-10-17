@@ -889,7 +889,7 @@ def main() -> int:
     # Retain the older Argus review fallback only after the Layla test has been published.
     force_seed_only = PUBLISH_ENABLED and not force_layla_only and SEED_POSTER_V3_KEY not in published
     last_post_raw = str(state.get("last_post_at", "")).strip()
-    if PUBLISH_ENABLED and last_post_raw and not force_seed_only:
+    if PUBLISH_ENABLED and last_post_raw and not force_seed_only and not force_layla_only:
         try:
             last_post_at = datetime.fromisoformat(last_post_raw.replace("Z", "+00:00"))
             if last_post_at.tzinfo is None:
