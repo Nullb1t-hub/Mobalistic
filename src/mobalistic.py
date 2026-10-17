@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import html
 import json
 import logging
@@ -35,7 +36,8 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
-HF_IMAGE_MODEL = os.getenv("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell").strip()  # routed via fal-ai
+HF_IMAGE_MODEL = os.getenv("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell").strip()  # optional paid provider fallback
+GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 MAX_POSTS_PER_RUN = 1  # Hard cap: never publish a burst.
 MAX_AGE_DAYS = max(1, min(14, int(os.getenv("MAX_AGE_DAYS", "7"))))
@@ -195,24 +197,51 @@ def gemini_text(prompt: str) -> str:
     return answer
 
 def generate_ai_artwork(prompt: str) -> Image.Image | None:
-    """Generate art through Hugging Face's current Inference Providers router."""
-    if not HF_TOKEN:
-        return None
-    try:
-        # FLUX.1-schnell is routed through Fal AI; the legacy hf-inference
-        # provider endpoint returns 410 for this model.
-        from huggingface_hub import InferenceClient
-        client = InferenceClient(provider="fal-ai", api_key=HF_TOKEN, timeout=90)
-        image = client.text_to_image(prompt=prompt, model=HF_IMAGE_MODEL)
-        image = image.convert("RGB")
-        if image.width < 512 or image.height < 512:
-            log.warning("AI image provider returned an unexpectedly small image")
-            return None
-        log.info("AI artwork generated using Hugging Face Inference Providers (fal-ai), model %s", HF_IMAGE_MODEL)
-        return image
-    except Exception as exc:
-        log.warning("AI image generation unavailable (provider access/quota may be limited): %s", exc)
-        return None
+    """Try Gemini image generation first, then optional Hugging Face provider."""
+    # Use the existing Gemini key first so Hugging Face's paid provider is not
+    # treated as the only path. Free-tier image access depends on Google's account/model quota.
+    if GEMINI_KEY:
+        try:
+            response = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_IMAGE_MODEL}:generateContent",
+                params={"key": GEMINI_KEY},
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+                },
+                timeout=90,
+            )
+            if response.ok:
+                payload = response.json()
+                for candidate in payload.get("candidates", []):
+                    for part in candidate.get("content", {}).get("parts", []):
+                        inline = part.get("inlineData") or part.get("inline_data") or {}
+                        encoded = inline.get("data")
+                        if encoded:
+                            from io import BytesIO
+                            raw = base64.b64decode(encoded)
+                            image = Image.open(BytesIO(raw)).convert("RGB")
+                            if image.width >= 512 and image.height >= 512:
+                                log.info("AI artwork generated using Gemini image model %s", GEMINI_IMAGE_MODEL)
+                                return image
+                log.warning("Gemini image model returned no usable image; trying optional fallback.")
+            else:
+                # Log status only: never leak API keys or request URLs containing them.
+                log.warning("Gemini image generation unavailable (HTTP %s); trying optional fallback.", response.status_code)
+        except Exception as exc:
+            log.warning("Gemini image generation request failed (%s); trying optional fallback.", type(exc).__name__)
+    if HF_TOKEN:
+        try:
+            from huggingface_hub import InferenceClient
+            client = InferenceClient(provider="fal-ai", api_key=HF_TOKEN, timeout=90)
+            image = client.text_to_image(prompt=prompt, model=HF_IMAGE_MODEL).convert("RGB")
+            if image.width >= 512 and image.height >= 512:
+                log.info("AI artwork generated using Hugging Face Inference Providers (fal-ai), model %s", HF_IMAGE_MODEL)
+                return image
+            log.warning("Hugging Face image provider returned an unexpectedly small image.")
+        except Exception as exc:
+            log.warning("Hugging Face image generation unavailable (provider access/quota may be limited): %s", exc)
+    return None
 
 def art_prompt(category: str, title: str, hero: str = "") -> str:
     subject = f"Mobile Legends hero {hero}" if hero else f"Mobile Legends Bang Bang editorial topic: {title}"
@@ -898,7 +927,7 @@ def main() -> int:
     builds = eligible_builds()
     # Do not crawl every hero on a run when no curated build registry exists:
     # MLBBDex only has written builds for a subset of heroes, so that scan can waste minutes.
-    api_build = discover_one_source_build(state) if builds else None
+    api_build = discover_one_source_build(state)
     if api_build:
         builds = [api_build] + [
             b for b in builds
