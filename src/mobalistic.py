@@ -771,7 +771,9 @@ def main() -> int:
             log.warning("Invalid last_post_at in state; cooldown cannot be evaluated.")
 
     builds = eligible_builds()
-    api_build = discover_one_source_build(state)
+    # Do not crawl every hero on a run when no curated build registry exists:
+    # MLBBDex only has written builds for a subset of heroes, so that scan can waste minutes.
+    api_build = discover_one_source_build(state) if builds else None
     if api_build:
         builds = [api_build] + [
             b for b in builds
