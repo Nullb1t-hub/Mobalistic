@@ -905,12 +905,23 @@ def main() -> int:
         log.error("GEMINI_API_KEY is missing. Add it to GitHub Actions secrets before running the content engine.")
         return 2
 
+    builds = eligible_builds()
+    # Do not crawl every hero on a run when no curated build registry exists:
+    # MLBBDex only has written builds for a subset of heroes, so that scan can waste minutes.
+    api_build = discover_one_source_build(state)
+    if api_build:
+        builds = [api_build] + [
+            b for b in builds
+            if f"build:{b.get('hero')}:{b.get('patch_version')}:{b.get('source_build_name', 'Build')}" !=
+               f"build:{api_build.get('hero')}:{api_build.get('patch_version')}:{api_build.get('source_build_name', 'Build')}"
+        ]
+
     # One-time Layla post bypasses cooldown to verify AI artwork after token setup.
     force_layla_only = PUBLISH_ENABLED and LAYLA_AI_TEST_KEY not in published
     # Retain the older Argus review fallback only after the Layla test has been published.
     force_seed_only = PUBLISH_ENABLED and not force_layla_only and SEED_POSTER_V3_KEY not in published
     last_post_raw = str(state.get("last_post_at", "")).strip()
-    if PUBLISH_ENABLED and last_post_raw and not force_seed_only and not force_layla_only:
+    if PUBLISH_ENABLED and last_post_raw and not force_seed_only and not force_layla_only and not api_build:
         try:
             last_post_at = datetime.fromisoformat(last_post_raw.replace("Z", "+00:00"))
             if last_post_at.tzinfo is None:
@@ -924,16 +935,6 @@ def main() -> int:
     elif force_seed_only:
         log.info("One-time review post enabled: only the redesigned Argus card may publish; all other sources are held.")
 
-    builds = eligible_builds()
-    # Do not crawl every hero on a run when no curated build registry exists:
-    # MLBBDex only has written builds for a subset of heroes, so that scan can waste minutes.
-    api_build = discover_one_source_build(state)
-    if api_build:
-        builds = [api_build] + [
-            b for b in builds
-            if f"build:{b.get('hero')}:{b.get('patch_version')}:{b.get('source_build_name', 'Build')}" !=
-               f"build:{api_build.get('hero')}:{api_build.get('patch_version')}:{api_build.get('source_build_name', 'Build')}"
-        ]
     candidates = collect_candidates(cfg, published)
     seed = curated_seed_candidate(published)
     layla_seed = curated_layla_candidate(published)
