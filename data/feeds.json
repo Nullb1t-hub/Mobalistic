@@ -9,19 +9,31 @@
   "searches": [
     {
       "category": "news",
-      "query": "site:oneesports.gg/mobile-legends-bang-bang/ Mobile Legends patch hero update"
+      "query": "site:oneesports.gg/mobile-legends-bang-bang/ Mobile Legends Bang Bang patch hero update"
+    },
+    {
+      "category": "news",
+      "query": "site:mlbbhub.com/news Mobile Legends Bang Bang patch update hero"
     },
     {
       "category": "esports",
-      "query": "site:esports.gg Mobile Legends MPL tournament roster result"
+      "query": "site:esports.gg Mobile Legends Bang Bang MPL tournament roster result"
+    },
+    {
+      "category": "esports",
+      "query": "site:liquipedia.net/mobilelegends Mobile Legends MPL tournament result"
     },
     {
       "category": "guides",
-      "query": "site:oneesports.gg/mobile-legends-bang-bang/ Mobile Legends tips guide gameplay"
+      "query": "site:oneesports.gg/mobile-legends-bang-bang/ Mobile Legends guide tips gameplay"
     },
     {
       "category": "builds",
-      "query": "site:mlbbdex.com/en/heroes Mobile Legends hero build items"
+      "query": "site:mlbb.io/hero/ Mobile Legends hero build emblem battle spell"
+    },
+    {
+      "category": "builds",
+      "query": "site:mlbbhub.com/builds Mobile Legends hero build items emblem"
     },
     {
       "category": "hot_topic",
@@ -35,7 +47,9 @@
     "liquipedia",
     "gosugamers",
     "moonton",
-    "mlbbdex"
+    "mlbbdex",
+    "mlbbhub",
+    "mlbb.io"
   ],
   "category_weights": {
     "builds": 45,
