@@ -1,7 +1,7 @@
 {
   "brand": {
     "name": "MOBALISTIC",
-    "tagline": "МЕТА. ГАЙДЫ. ПОБЕДЫ.",
+    "tagline": "МЕТА. ПИКИ. ПОБЕДЫ.",
     "accent": "#A78BFA",
     "background": "#0B0D16",
     "panel": "#171A2B"
@@ -9,35 +9,33 @@
   "searches": [
     {
       "category": "news",
-      "query": "\"Mobile Legends Bang Bang\" patch update"
+      "query": "site:oneesports.gg/mobile-legends-bang-bang/ Mobile Legends patch hero update"
     },
     {
       "category": "esports",
-      "query": "\"Mobile Legends\" MPL tournament esports"
+      "query": "site:esports.gg Mobile Legends MPL tournament roster result"
     },
     {
       "category": "guides",
-      "query": "\"Mobile Legends\" guide tips gameplay"
+      "query": "site:oneesports.gg/mobile-legends-bang-bang/ Mobile Legends tips guide gameplay"
     },
     {
       "category": "builds",
-      "query": "\"Mobile Legends\" hero build meta"
+      "query": "site:mlbbdex.com/en/heroes Mobile Legends hero build items"
     },
     {
       "category": "hot_topic",
-      "query": "\"Mobile Legends\" player announcement community trending"
+      "query": "site:afkgaming.com/mobileesports Mobile Legends Bang Bang patch hero"
     }
   ],
   "trusted_publishers": [
-    "mobile legends: bang bang",
-    "mobile legends",
     "one esports",
     "esports.gg",
-    "liquipedia",
     "afkgaming",
+    "liquipedia",
     "gosugamers",
-    "the esports observer",
-    "moonton"
+    "moonton",
+    "mlbbdex"
   ],
   "category_weights": {
     "builds": 45,
