@@ -1,5 +1,46 @@
 {
   "schema_version": 1,
   "instructions": "Only add builds verified against the current game patch. Include source_url, verified_at (YYYY-MM-DD), patch_version, hero, six ordered items with name and direct image_url, and set verified=true only after human/source verification.",
-  "builds": []
+  "builds": [
+    {
+      "hero": "Argus",
+      "patch_version": "2.2.16a",
+      "source_build_name": "EXP Attack-Effect Default",
+      "source_url": "https://mlbbhub.com/heroes/argus",
+      "verified_at": "2026-10-18",
+      "verified": true,
+      "verification_method": "Manually checked current MLBBHub hero page: current patch 2.2.16a, curated default build and item order",
+      "context": "Current curated EXP-lane attack-effect default. Core path: attack speed and on-hit effects; adapt final slots to enemy draft.",
+      "hero_image_url": "https://akmweb.youngjoygame.com/web/svnres/img/test/homepage_2_2_16_1232_1/100_0bd96658e5b8ec578226ea1622bd7231.png",
+      "emblem_name": "Marksman Emblem",
+      "battle_spell_names": "Flicker",
+      "items": [
+        {
+          "name": "Swift Boots",
+          "image_url": "https://mlbbhub.com/images/items/swift-boots.png"
+        },
+        {
+          "name": "Corrosion Scythe",
+          "image_url": "https://mlbbhub.com/images/items/corrosion-scythe.png"
+        },
+        {
+          "name": "Demon Hunter Sword",
+          "image_url": "https://mlbbhub.com/images/items/demon-hunter-sword.png"
+        },
+        {
+          "name": "Golden Staff",
+          "image_url": "https://mlbbhub.com/images/items/golden-staff.png"
+        },
+        {
+          "name": "Haas's Claws",
+          "image_url": "https://mlbbhub.com/images/items/haass-claws.png"
+        },
+        {
+          "name": "Malefic Roar",
+          "image_url": "https://mlbbhub.com/images/items/malefic-roar.png"
+        }
+      ],
+      "attribution": "Build source: MLBBHub curated Argus guide, patch 2.2.16a. Item icon assets from MLBBHub; verify situational slots in-game."
+    }
+  ]
 }
