@@ -15,7 +15,7 @@ from urllib.parse import quote, urlparse
 
 import feedparser
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
@@ -44,7 +44,6 @@ CATEGORY_LABELS = {
     "guides": "ГАЙД И ИДЕЯ",
     "news": "НОВОСТИ MLBB",
     "esports": "КИБЕРСПОРТ",
-    "memes": "MLBB MEME",
     "hot_topic": "ТЕМА ДНЯ",
 }
 
@@ -56,6 +55,7 @@ class Candidate:
     summary: str
     category: str
     published_at: str = ""
+    image_url: str = ""
 
 def read_json(path: Path, default: Any) -> Any:
     try:
@@ -139,10 +139,22 @@ def collect_candidates(cfg: dict[str, Any], published_urls: set[str]) -> list[Ca
             if published is None or published < cutoff or published > datetime.now(timezone.utc) + timedelta(hours=12):
                 continue
 
+            image_url = ""
+            for media in entry.get("media_content", []) or []:
+                candidate_url = str(media.get("url", "")).strip() if isinstance(media, dict) else ""
+                if candidate_url.startswith("https://"):
+                    image_url = candidate_url
+                    break
+            if not image_url:
+                for link in entry.get("links", []) or []:
+                    candidate_url = str(link.get("href", "")).strip() if isinstance(link, dict) else ""
+                    if candidate_url.startswith("https://") and "image" in str(link.get("type", "")).lower():
+                        image_url = candidate_url
+                        break
             candidate = Candidate(
                 url=url, title=title, publisher=publisher,
                 summary=summary, category=category,
-                published_at=published.isoformat(),
+                published_at=published.isoformat(), image_url=image_url,
             )
             candidates[url] = candidate
 
@@ -208,29 +220,6 @@ def make_caption(item: Candidate) -> str | None:
         caption = caption[:940].rsplit(" ", 1)[0] + f"…\n\nИсточник: {item.url}"
     return caption
 
-def make_meme_post() -> tuple[str, str]:
-    """Generate an original, evergreen gameplay meme without asserting news or game stats."""
-    prompt = """
-Придумай ОДИН оригинальный короткий мем для русскоязычного Telegram-канала MOBALISTIC про Mobile Legends: Bang Bang.
-Тема — узнаваемая ситуация из обычного матча (лесник, соло-линия, тиммейты, ранкед, ласт пик и т.п.).
-Не оскорбляй конкретных игроков, не используй ненависть, не выдумывай новости, патчи или реальные цитаты.
-Стиль — живой игровой юмор, не похоже на рекламный текст.
-Ответь строго в формате:
-ЗАГОЛОВОК: короткая фраза до 65 символов
-ТЕКСТ: две короткие строки, подходящие для подписи к карточке
-"""
-    raw = gemini_text(prompt).strip()
-    title_match = re.search(r"ЗАГОЛОВОК:\s*(.+)", raw)
-    text_match = re.search(r"ТЕКСТ:\s*([\s\S]+)", raw)
-    if not title_match or not text_match:
-        raise RuntimeError("Gemini meme response did not match the required format")
-    title = title_match.group(1).strip()[:90]
-    body = text_match.group(1).strip()
-    if len(title) < 8 or len(body) < 15:
-        raise RuntimeError("Gemini meme response was too short")
-    caption = f"🎮 {title}\n\n{body}\n\n#MLBB #Mobalistic"
-    return title, caption[:1000]
-
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     options = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -289,43 +278,96 @@ def draw_background(cfg: dict[str, Any]) -> tuple[Image.Image, ImageDraw.ImageDr
     draw.text((70, 1272), "MOBALISTIC  •  MOBILE LEGENDS: BANG BANG", font=font(16, True), fill=(230, 232, 255, 180))
     return image, draw
 
-def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publisher: str = "") -> Path:
+def article_image(url: str) -> Image.Image | None:
+    """Fetch a publisher's own article image when available; never invent a fake thumbnail."""
+    if not url.startswith("https://"):
+        return None
+    try:
+        response = requests.get(
+            url, timeout=12,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; MobalisticBot/1.0)"},
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        content_type = response.headers.get("Content-Type", "").lower()
+        if content_type.startswith("image/"):
+            payload = response.content
+        elif "text/html" in content_type or not content_type:
+            html_text = response.text[:1_500_000]
+            matches = re.findall(
+                r'<meta[^>]+(?:property|name)=["\'](?:og:image|twitter:image)["\'][^>]+content=["\']([^"\']+)["\']|'
+                r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:og:image|twitter:image)["\']',
+                html_text, flags=re.I,
+            )
+            image_url = next((first or second for first, second in matches if (first or second).startswith("https://")), "")
+            if not image_url:
+                return None
+            image_response = requests.get(
+                image_url, timeout=12,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; MobalisticBot/1.0)"},
+            )
+            image_response.raise_for_status()
+            if not image_response.headers.get("Content-Type", "").lower().startswith("image/"):
+                return None
+            payload = image_response.content
+        else:
+            return None
+        if not payload or len(payload) > 5_000_000:
+            return None
+        from io import BytesIO
+        return Image.open(BytesIO(payload)).convert("RGB")
+    except Exception as exc:
+        log.info("Article artwork unavailable; use branded fallback: %s", exc)
+        return None
+
+def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publisher: str = "", source_url: str = "", image_url: str = "") -> Path:
+    """Create an editorial image with real publisher artwork when available."""
     DRAFTS.mkdir(parents=True, exist_ok=True)
-    image, draw = draw_background(cfg)
-    accent = cfg.get("brand", {}).get("accent", "#A78BFA")
-    label = CATEGORY_LABELS.get(category, "MLBB")
-    draw.rounded_rectangle((70, 205, 360, 258), radius=24, fill=accent)
-    draw.text((92, 218), label, font=font(19, True), fill="#10111A")
-
-    # Large typographic composition with deliberate line breaks.
-    title_font = font(66, True)
-    lines = wrap_by_pixels(draw, title, title_font, 870)
-    if len(lines) > 5:
-        title_font = font(54, True)
-        lines = wrap_by_pixels(draw, title, title_font, 870)
-    y = 330
-    for line in lines[:6]:
-        draw.text((70, y), line, font=title_font, fill="#FFFFFF", stroke_width=0)
-        y += title_font.size + 20
-
-    # Decorative game-inspired geometric shapes, not copied game artwork.
-    draw.rounded_rectangle((70, 870, 1010, 1120), radius=28, fill=(15, 17, 31, 230), outline=(167, 139, 250, 100), width=2)
-    if category == "memes":
-        panel_lines = ("КОГДА РАНКЕД ПОШЁЛ НЕ ТУДА", "МЫ ВСЕ ЭТО ПРОХОДИЛИ", "MOBALISTIC • ЮМОР ПО-НАШЕМУ")
-    elif category == "news" or category == "esports" or category == "hot_topic":
-        panel_lines = ("СОБЫТИЯ ИЗ МИРА MLBB", "КОНТЕКСТ ВАЖНЕЕ СЛУХОВ", "Читай источник и следи за обновлениями")
-    elif category == "guides":
-        panel_lines = ("МЕНЬШЕ ТИЛЬТА.", "БОЛЬШЕ ОСОЗНАННЫХ РЕШЕНИЙ.", "Сохрани идею и проверь в игре")
+    width, height = 1080, 1350
+    brand = cfg.get("brand", {})
+    accent = brand.get("accent", "#A78BFA")
+    base = brand.get("background", "#0B0D16")
+    artwork = article_image(image_url or source_url)
+    if artwork is not None:
+        scale = max(width / artwork.width, height / artwork.height)
+        artwork = artwork.resize((int(artwork.width * scale), int(artwork.height * scale)), Image.Resampling.LANCZOS)
+        left, top = (artwork.width - width) // 2, (artwork.height - height) // 2
+        image = artwork.crop((left, top, left + width, top + height)).filter(ImageFilter.GaussianBlur(1.5))
+        shade = Image.new("RGBA", (width, height), (5, 7, 16, 112))
+        image = Image.alpha_composite(image.convert("RGBA"), shade)
     else:
-        panel_lines = ("МЕТА МЕНЯЕТСЯ.", "ИГРАЙ С ГОЛОВОЙ.", "Проверяй патч • адаптируйся • побеждай")
-    draw.text((105, 920), panel_lines[0], font=font(27, True), fill="#FFFFFF")
-    draw.text((105, 968), panel_lines[1], font=font(27, True), fill=accent)
-    draw.text((105, 1034), panel_lines[2], font=font(19), fill=(225, 225, 240, 230))
-    if publisher:
-        source_label = publisher[:70]
-        draw.text((70, 1170), "ИСТОЧНИК  /  " + source_label, font=font(17), fill=(220, 220, 238, 190))
-    out = DRAFTS / f"card-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')}.png"
-    image.save(out, "PNG", optimize=True)
+        image = Image.new("RGB", (width, height), base).convert("RGBA")
+        glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(glow)
+        gd.ellipse((-260, -250, 780, 780), fill=(167, 139, 250, 58))
+        gd.ellipse((520, 650, 1450, 1550), fill=(65, 95, 255, 28))
+        image = Image.alpha_composite(image, glow.filter(ImageFilter.GaussianBlur(110)))
+    draw = ImageDraw.Draw(image, "RGBA")
+    draw.rectangle((0, 0, width, 14), fill=accent)
+    draw.rounded_rectangle((54, 54, width - 54, height - 54), radius=30, outline=(255, 255, 255, 48), width=2)
+    draw.text((76, 74), "MOBALISTIC", font=font(28, True), fill=(255, 255, 255, 255))
+    draw.text((78, 116), CATEGORY_LABELS.get(category, "MLBB").upper(), font=font(18, True), fill=accent)
+    draw.line((76, 164, 270, 164), fill=accent, width=5)
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    for y in range(480, 1190):
+        alpha = int(20 + 205 * ((y - 480) / 710))
+        od.line((0, y, width, y), fill=(5, 7, 16, alpha))
+    image = Image.alpha_composite(image, overlay)
+    draw = ImageDraw.Draw(image, "RGBA")
+    title_font = font(64, True)
+    lines = wrap_by_pixels(draw, title, title_font, 900)
+    if len(lines) > 5:
+        title_font = font(52, True)
+        lines = wrap_by_pixels(draw, title, title_font, 900)
+    y = min(800, max(430, 1110 - len(lines) * (title_font.size + 15)))
+    for line in lines[:6]:
+        draw.text((76, y), line, font=title_font, fill="#FFFFFF", stroke_width=1, stroke_fill=(0, 0, 0, 80))
+        y += title_font.size + 17
+    draw.text((78, 1175), (publisher or "MOBILE LEGENDS: BANG BANG")[:70], font=font(18, True), fill=(235, 235, 250, 225))
+    draw.text((78, 1220), "ИГРАЙ УМНЕЕ  /  MOBALISTIC", font=font(16, True), fill=accent)
+    out = DRAFTS / f"card-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')}.jpg"
+    image.convert("RGB").save(out, "JPEG", quality=91, optimize=True)
     return out
 
 def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None:
@@ -389,47 +431,31 @@ def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None
     image.save(out, "PNG", optimize=True)
     return out
 
-def telegram_send_message(text: str) -> None:
-    """Send the actual editorial post as a standalone Telegram message."""
-    if not BOT_TOKEN or not CHANNEL_ID:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID are required to publish")
-    endpoint = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    response = requests.post(
-        endpoint,
-        json={"chat_id": CHANNEL_ID, "text": text[:4000], "parse_mode": "HTML", "disable_web_page_preview": True},
-        timeout=45,
-    )
-    try:
-        result = response.json()
-    except ValueError:
-        response.raise_for_status()
-        raise RuntimeError("Telegram sendMessage returned a non-JSON response")
-    if response.status_code >= 400 or not result.get("ok"):
-        # Telegram's description tells us whether the chat ID, permissions, or HTML is invalid.
-        description = str(result.get("description", response.text))[:500]
-        raise RuntimeError(f"Telegram sendMessage failed (HTTP {response.status_code}): {description}")
-
-def telegram_send_photo(image_path: Path) -> None:
-    """Send the artwork as a separate image, with no text embedded in its caption."""
+def telegram_send_photo(image_path: Path, caption: str) -> None:
+    """Publish artwork and its readable HTML text as ONE Telegram photo post."""
     if not BOT_TOKEN or not CHANNEL_ID:
         raise RuntimeError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID are required to publish")
     endpoint = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
     with image_path.open("rb") as photo:
         response = requests.post(
             endpoint,
-            data={"chat_id": CHANNEL_ID},
-            files={"photo": (image_path.name, photo, "image/png")},
+            data={"chat_id": CHANNEL_ID, "caption": caption[:1024], "parse_mode": "HTML"},
+            files={"photo": (image_path.name, photo, "image/jpeg" if image_path.suffix.lower() in {".jpg", ".jpeg"} else "image/png")},
             timeout=45,
         )
-    response.raise_for_status()
-    result = response.json()
-    if not result.get("ok"):
-        raise RuntimeError("Telegram API did not confirm sendPhoto")
+    try:
+        result = response.json()
+    except ValueError:
+        response.raise_for_status()
+        raise RuntimeError("Telegram sendPhoto returned a non-JSON response")
+    if response.status_code >= 400 or not result.get("ok"):
+        description = str(result.get("description", response.text))[:500]
+        raise RuntimeError(f"Telegram sendPhoto failed (HTTP {response.status_code}): {description}")
 
 def record_preview(image_path: Path, caption: str, category: str) -> None:
     preview_path = image_path.with_suffix(".txt")
     preview_path.write_text(
-        f"CATEGORY: {category}\nPUBLISH_ENABLED: false\nTELEGRAM_LAYOUT: text message first, image as separate attachment\n\nPOST TEXT:\n{caption}\n\nIMAGE FILE: {image_path.name}\n",
+        f"CATEGORY: {category}\nPUBLISH_ENABLED: false\nTELEGRAM_LAYOUT: one photo post with readable HTML caption\n\nPOST TEXT:\n{caption}\n\nIMAGE FILE: {image_path.name}\n",
         encoding="utf-8",
     )
     log.info("PREVIEW ONLY — category=%s image=%s post_text=%s", category, image_path, caption.replace("\n", " | "))
@@ -595,21 +621,20 @@ def main() -> int:
                f"build:{api_build.get('hero')}:{api_build.get('patch_version')}:{api_build.get('source_build_name', 'Build')}"
         ]
     candidates = collect_candidates(cfg, published)
-    available: set[str] = {"memes"}
+    available: set[str] = set()
     if builds:
         available.add("builds")
     for candidate in candidates:
         if candidate.category in {"guides", "news", "esports", "hot_topic"}:
             available.add(candidate.category)
     if not candidates and not builds:
-        log.info("No recent trusted news/build found; only an original meme may be prepared.")
+        log.info("No eligible news or verified build found; skip this run.")
     
     posted = 0
     used_urls: set[str] = set()
-    meme_key = f"meme:{datetime.now(timezone.utc).date().isoformat()}"
     while posted < MAX_POSTS_PER_RUN:
         remaining = [c for c in candidates if c.url not in used_urls]
-        choices = {"memes"} if meme_key not in published and meme_key not in used_urls else set()
+        choices: set[str] = set()
         if builds:
             choices.add("builds")
         choices.update(c.category for c in remaining if c.category in {"guides", "news", "esports", "hot_topic"})
@@ -636,16 +661,6 @@ def main() -> int:
             caption = build_caption(selected)
             source_key = f"build:{selected['hero']}:{selected['patch_version']}:{selected.get('source_build_name', 'Build')}"
             builds = [b for b in builds if b is not selected]
-        elif category == "memes":
-            try:
-                meme_title, caption = make_meme_post()
-                image_path = create_editorial_card(cfg, "memes", meme_title, "ORIGINAL MOBALISTIC MEME")
-                source_key = meme_key
-                used_urls.add(meme_key)
-            except Exception as exc:
-                log.warning("Could not generate meme: %s", exc)
-                used_urls.add(meme_key)
-                continue
         else:
             selected_candidate = next((c for c in remaining if c.category == category), None)
             if selected_candidate is None:
@@ -662,16 +677,18 @@ def main() -> int:
             # Use the AI-written Russian headline on the image, not the English RSS headline.
             image_title = re.sub(r"<[^>]+>", "", caption.splitlines()[0]).strip()[:110]
             image_title = html.unescape(image_title) or selected_candidate.title
-            image_path = create_editorial_card(cfg, category, image_title, selected_candidate.publisher)
+            image_path = create_editorial_card(
+                cfg, category, image_title, selected_candidate.publisher,
+                source_url=selected_candidate.url, image_url=selected_candidate.image_url,
+            )
             source_key = selected_candidate.url
 
         if image_path is None or not caption:
             continue
         if PUBLISH_ENABLED:
             try:
-                # The readable post goes into Telegram as text. The image is only an attachment.
-                telegram_send_message(caption)
-                telegram_send_photo(image_path)
+                # One Telegram message: image plus readable caption, never two separate posts.
+                telegram_send_photo(image_path, caption)
             except Exception:
                 log.exception("Telegram publication failed; state was not advanced")
                 return 3
