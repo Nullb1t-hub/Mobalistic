@@ -203,6 +203,29 @@ def make_caption(item: Candidate) -> str | None:
         caption = caption[:940].rsplit(" ", 1)[0] + f"…\n\nИсточник: {item.url}"
     return caption
 
+def make_meme_post() -> tuple[str, str]:
+    """Generate an original, evergreen gameplay meme without asserting news or game stats."""
+    prompt = """
+Придумай ОДИН оригинальный короткий мем для русскоязычного Telegram-канала MOBALISTIC про Mobile Legends: Bang Bang.
+Тема — узнаваемая ситуация из обычного матча (лесник, соло-линия, тиммейты, ранкед, ласт пик и т.п.).
+Не оскорбляй конкретных игроков, не используй ненависть, не выдумывай новости, патчи или реальные цитаты.
+Стиль — живой игровой юмор, не похоже на рекламный текст.
+Ответь строго в формате:
+ЗАГОЛОВОК: короткая фраза до 65 символов
+ТЕКСТ: две короткие строки, подходящие для подписи к карточке
+"""
+    raw = gemini_text(prompt).strip()
+    title_match = re.search(r"ЗАГОЛОВОК:\s*(.+)", raw)
+    text_match = re.search(r"ТЕКСТ:\s*([\s\S]+)", raw)
+    if not title_match or not text_match:
+        raise RuntimeError("Gemini meme response did not match the required format")
+    title = title_match.group(1).strip()[:90]
+    body = text_match.group(1).strip()
+    if len(title) < 8 or len(body) < 15:
+        raise RuntimeError("Gemini meme response was too short")
+    caption = f"🎮 {title}\n\n{body}\n\n#MLBB #Mobalistic"
+    return title, caption[:1000]
+
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     options = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -430,22 +453,21 @@ def main() -> int:
 
     builds = eligible_builds()
     candidates = collect_candidates(cfg, published)
-    available: set[str] = set()
+    available: set[str] = {"memes"}
     if builds:
         available.add("builds")
     for candidate in candidates:
         if candidate.category in {"guides", "news", "esports"}:
             available.add(candidate.category)
-    # No invented memes/hot topics: they require a separately sourced prompt/topic before activation.
     if not candidates and not builds:
-        log.warning("No verified build or trusted recent source found. Nothing to publish.")
-        return 0
-
+        log.info("No recent trusted news/build found; only an original meme may be prepared.")
+    
     posted = 0
     used_urls: set[str] = set()
+    meme_key = f"meme:{datetime.now(timezone.utc).date().isoformat()}"
     while posted < MAX_POSTS_PER_RUN:
         remaining = [c for c in candidates if c.url not in used_urls]
-        choices = set()
+        choices = {"memes"} if meme_key not in published and meme_key not in used_urls else set()
         if builds:
             choices.add("builds")
         choices.update(c.category for c in remaining if c.category in {"guides", "news", "esports"})
@@ -468,6 +490,16 @@ def main() -> int:
             caption = build_caption(selected)
             source_key = f"build:{selected['hero']}:{selected['patch_version']}"
             builds = [b for b in builds if b is not selected]
+        elif category == "memes":
+            try:
+                meme_title, caption = make_meme_post()
+                image_path = create_editorial_card(cfg, "memes", meme_title, "ORIGINAL MOBALISTIC MEME")
+                source_key = meme_key
+                used_urls.add(meme_key)
+            except Exception as exc:
+                log.warning("Could not generate meme: %s", exc)
+                used_urls.add(meme_key)
+                continue
         else:
             selected_candidate = next((c for c in remaining if c.category == category), None)
             if selected_candidate is None:
