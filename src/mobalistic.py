@@ -866,9 +866,8 @@ def main() -> int:
         if f"build:{b.get('hero')}:{b.get('patch_version')}:{b.get('source_build_name', 'Build')}" not in published
         and f"build:{b.get('hero')}:{b.get('patch_version')}" not in published
     ]
-    # Use a reviewed build immediately. Only crawl the live API when the curated
-    # registry has no unposted builds, avoiding slow scans on every code push.
-    api_build = discover_one_source_build(state) if not builds else None
+    # The agent discovers source-backed builds on every run; the registry is only a fallback.
+    api_build = discover_one_source_build(state)
     if api_build:
         builds = [api_build] + [
             b for b in builds
