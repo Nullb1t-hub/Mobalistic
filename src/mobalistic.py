@@ -905,10 +905,14 @@ def main() -> int:
         log.error("GEMINI_API_KEY is missing. Add it to GitHub Actions secrets before running the content engine.")
         return 2
 
-    builds = eligible_builds()
-    # Do not crawl every hero on a run when no curated build registry exists:
-    # MLBBDex only has written builds for a subset of heroes, so that scan can waste minutes.
-    api_build = discover_one_source_build(state)
+    builds = [
+        b for b in eligible_builds()
+        if f"build:{b.get('hero')}:{b.get('patch_version')}:{b.get('source_build_name', 'Build')}" not in published
+        and f"build:{b.get('hero')}:{b.get('patch_version')}" not in published
+    ]
+    # Use a reviewed build immediately. Only crawl the live API when the curated
+    # registry has no unposted builds, avoiding slow scans on every code push.
+    api_build = discover_one_source_build(state) if not builds else None
     if api_build:
         builds = [api_build] + [
             b for b in builds
