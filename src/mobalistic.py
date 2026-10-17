@@ -803,9 +803,11 @@ def main() -> int:
         log.error("GEMINI_API_KEY is missing. Add it to GitHub Actions secrets before running the content engine.")
         return 2
 
-    # Manual workflow_dispatch cannot bypass the cooldown.
+    # One-time exception: publish only the redesigned Argus card once for the user to review.
+    # Once its dedicated key is recorded after Telegram confirms delivery, the normal 4-hour cooldown applies.
+    force_seed_only = PUBLISH_ENABLED and SEED_POSTER_V2_KEY not in published
     last_post_raw = str(state.get("last_post_at", "")).strip()
-    if PUBLISH_ENABLED and last_post_raw:
+    if PUBLISH_ENABLED and last_post_raw and not force_seed_only:
         try:
             last_post_at = datetime.fromisoformat(last_post_raw.replace("Z", "+00:00"))
             if last_post_at.tzinfo is None:
@@ -816,6 +818,8 @@ def main() -> int:
                 return 0
         except ValueError:
             log.warning("Invalid last_post_at in state; cooldown cannot be evaluated.")
+    elif force_seed_only:
+        log.info("One-time review post enabled: only the redesigned Argus card may publish; all other sources are held.")
 
     builds = eligible_builds()
     # Do not crawl every hero on a run when no curated build registry exists:
@@ -829,7 +833,13 @@ def main() -> int:
         ]
     candidates = collect_candidates(cfg, published)
     seed = curated_seed_candidate(published)
-    if seed is not None and all(candidate.url != seed.url for candidate in candidates):
+    if force_seed_only:
+        # Strictly prevent any old/other article from being selected during this one-time bypass.
+        candidates = [seed] if seed is not None else []
+        builds = []
+        if seed is None:
+            log.warning("One-time review post unavailable; no post sent and cooldown state remains unchanged.")
+    elif seed is not None and all(candidate.url != seed.url for candidate in candidates):
         candidates.append(seed)
         log.info("Added one-time source-backed starter post to prevent an empty first launch.")
     available: set[str] = set()
