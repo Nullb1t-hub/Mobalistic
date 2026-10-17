@@ -160,7 +160,9 @@ def collect_candidates(cfg: dict[str, Any], published_urls: set[str]) -> list[Ca
             candidates[url] = candidate
 
     # Stable order: newest first, with exact URLs deduplicated.
-    return sorted(candidates.values(), key=lambda c: c.published_at, reverse=True)
+    result = sorted(candidates.values(), key=lambda c: c.published_at, reverse=True)
+    log.info("RSS discovery found %s eligible unique candidate(s) across %s searches.", len(result), len(cfg["searches"]))
+    return result
 
 def gemini_text(prompt: str) -> str:
     if not GEMINI_KEY:
