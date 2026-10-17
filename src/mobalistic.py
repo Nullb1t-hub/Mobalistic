@@ -38,6 +38,7 @@ GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
 HF_IMAGE_MODEL = os.getenv("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell").strip()  # optional paid provider fallback
 GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image").strip()
+HF_PAID_FALLBACK = os.getenv("HF_PAID_FALLBACK", "false").lower() == "true"
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 MAX_POSTS_PER_RUN = 1  # Hard cap: never publish a burst. Build-first publisher revision.
 MAX_AGE_DAYS = max(1, min(14, int(os.getenv("MAX_AGE_DAYS", "7"))))
@@ -230,7 +231,7 @@ def generate_ai_artwork(prompt: str) -> Image.Image | None:
                 log.warning("Gemini image generation unavailable (HTTP %s); trying optional fallback.", response.status_code)
         except Exception as exc:
             log.warning("Gemini image generation request failed (%s); trying optional fallback.", type(exc).__name__)
-    if HF_TOKEN:
+    if HF_TOKEN and HF_PAID_FALLBACK:
         try:
             from huggingface_hub import InferenceClient
             client = InferenceClient(provider="fal-ai", api_key=HF_TOKEN, timeout=90)
@@ -241,9 +242,11 @@ def generate_ai_artwork(prompt: str) -> Image.Image | None:
             log.warning("Hugging Face image provider returned an unexpectedly small image.")
         except Exception as exc:
             log.warning("Hugging Face image generation unavailable (provider access/quota may be limited): %s", exc)
+    elif HF_TOKEN and not HF_PAID_FALLBACK:
+        log.info("Hugging Face paid fallback is disabled; no paid image request was made.")
     return None
 
-def art_prompt(category: str, title: str, hero: str = "") -> str:
+def art_prompt(category: str, title: str, hero: str = ""):
     subject = f"Mobile Legends hero {hero}" if hero else f"Mobile Legends Bang Bang editorial topic: {title}"
     return (
         "Create premium esports key art for a Mobile Legends: Bang Bang community media channel. "
