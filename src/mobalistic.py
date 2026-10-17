@@ -39,7 +39,7 @@ HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
 HF_IMAGE_MODEL = os.getenv("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell").strip()  # optional paid provider fallback
 GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
-MAX_POSTS_PER_RUN = 1  # Hard cap: never publish a burst.
+MAX_POSTS_PER_RUN = 1  # Hard cap: never publish a burst. Build-first publisher revision.
 MAX_AGE_DAYS = max(1, min(14, int(os.getenv("MAX_AGE_DAYS", "7"))))
 REQUEST_TIMEOUT = 25
 MIN_POST_INTERVAL = timedelta(hours=4)
