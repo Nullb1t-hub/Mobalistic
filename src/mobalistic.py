@@ -730,7 +730,7 @@ def discover_one_source_build(state: dict[str, Any]) -> dict[str, Any] | None:
             return None
         heroes.sort(key=lambda h: (normalise(str(h["name"])) != "argus", normalise(str(h["name"]))))
         cursor = int(state.get("build_cursor", 0)) % len(heroes)
-        scan_count = min(16, len(heroes))
+        scan_count = min(24, len(heroes))
         published = set(state.get("published", []))
 
         for offset in range(scan_count):
