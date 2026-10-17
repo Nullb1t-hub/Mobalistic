@@ -531,6 +531,51 @@ def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None
     image.save(out, "PNG", optimize=True)
     return out
 
+
+def create_hero_build_poster(cfg: dict[str, Any], hero: str, hero_image_url: str, build_label: str,
+                             emblem_text: str, talent_text: str, spell_text: str) -> Path | None:
+    """Use actual hero artwork with a clean build-info strip; no generated/fake hero art."""
+    artwork = article_image(hero_image_url) if hero_image_url else None
+    if artwork is None:
+        log.warning("No real hero artwork available for %s; skip hero build poster", hero)
+        return None
+    width, height = 1080, 1350
+    scale = max(width / artwork.width, 930 / artwork.height)
+    artwork = artwork.resize((int(artwork.width * scale), int(artwork.height * scale)), Image.Resampling.LANCZOS)
+    left = max(0, (artwork.width - width) // 2)
+    top = max(0, (artwork.height - 930) // 2)
+    artwork = artwork.crop((left, top, left + width, top + 930)).convert("RGBA")
+    # Soft darkening keeps the original game artwork recognizable and text legible.
+    shade = Image.new("RGBA", artwork.size, (7, 9, 18, 72))
+    image = Image.alpha_composite(artwork, shade)
+    panel = Image.new("RGBA", (width, height - 860), (10, 12, 22, 255))
+    image.alpha_composite(panel, (0, 860))
+    draw = ImageDraw.Draw(image, "RGBA")
+    brand = cfg.get("brand", {})
+    accent = brand.get("accent", "#A78BFA")
+    draw.rounded_rectangle((54, 48, 330, 100), radius=22, fill=(8, 10, 20, 200), outline=(255,255,255,65), width=1)
+    draw.text((76, 61), "MOBALISTIC  /  MLBB", font=font(21, True), fill="#FFFFFF")
+    draw.rounded_rectangle((54, 770, 480, 826), radius=24, fill=accent)
+    draw.text((78, 784), build_label.upper(), font=font(22, True), fill="#11121B")
+    draw.text((58, 892), hero.upper(), font=font(57, True), fill="#FFFFFF")
+    draw.text((60, 970), "ЧТО ЧАЩЕ БЕРУТ ИГРОКИ", font=font(20, True), fill=accent)
+    rows = [
+        ("ЭМБЛЕМА", emblem_text),
+        ("ТАЛАНТ", talent_text),
+        ("ЗАКЛИНАНИЕ", spell_text),
+    ]
+    y = 1020
+    for label, value in rows:
+        draw.rounded_rectangle((58, y, 1022, y + 78), radius=18, fill=(255,255,255,12), outline=(255,255,255,30), width=1)
+        draw.text((82, y + 12), label, font=font(15, True), fill=accent)
+        draw.text((300, y + 20), value[:50], font=font(23, True), fill="#FFFFFF")
+        y += 88
+    draw.text((60, 1300), "ЧАСТОТА ВЫБОРА ≠ ГАРАНТИЯ ПОБЕДЫ", font=font(15, True), fill=(220,222,238,210))
+    DRAFTS.mkdir(parents=True, exist_ok=True)
+    out = DRAFTS / f"hero-build-{re.sub(r'[^a-zA-Z0-9_-]+', '-', hero.lower())}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.jpg"
+    image.convert("RGB").save(out, "JPEG", quality=92, optimize=True)
+    return out
+
 def telegram_send_photo(image_path: Path, caption: str) -> None:
     """Publish artwork and its readable HTML text as ONE Telegram photo post."""
     if not BOT_TOKEN or not CHANNEL_ID:
@@ -700,13 +745,12 @@ def build_caption(build: dict[str, Any]) -> str:
 
 SEED_SOURCE_URL = "https://mlbb.io/tl/hero/argus/build"
 SEED_CAPTION = (
-    "<b>Аргус: что сейчас берут в сборках</b>\n\n"
-    "В сводке 43 комьюнити-сборок MLBB.io (обновление 17 октября) чаще всего встречаются "
-    "эмблема Marksman (21 из 43) и талант War Cry (27 из 43). Из боевых заклинаний лидирует "
-    "Inspire — 49%; Petrify тоже используют.\n\n"
-    "Это частота выборов, не винрейт и не универсальная сборка: подстраивай предметы под драфт.\n\n"
+    "<b>Аргус — сборка #1: что чаще берут</b>\n\n"
+    "Залетел посмотреть, что собирают на Аргуса: в выборке из 43 сборок чаще всего стоят Marksman и War Cry. "
+    "По заклинаниям впереди Inspire, но Petrify тоже встречается — тут уже смотри по пикам и тому, как хочешь заходить в файт.\n\n"
+    "Это статистика выборов, не кнопка «победить». Предметы всё равно подстраивай под составы.\n\n"
     "🔗 <a href=\"https://mlbb.io/tl/hero/argus/build\">Источник</a>\n"
-    "#MLBB #Argus #Mobalistic"
+    "#Аргус #АргусСборка1 #СборкиMLBB #MLBB #Mobalistic"
 )
 
 def curated_seed_candidate(published_urls: set[str]) -> Candidate | None:
@@ -843,10 +887,16 @@ def main() -> int:
             # Use the AI-written Russian headline on the image, not the English RSS headline.
             image_title = re.sub(r"<[^>]+>", "", caption.splitlines()[0]).strip()[:110]
             image_title = html.unescape(image_title) or selected_candidate.title
-            image_path = create_editorial_card(
-                cfg, category, image_title, selected_candidate.publisher,
-                source_url=selected_candidate.url, image_url=selected_candidate.image_url,
-            )
+            if selected_candidate.url == SEED_SOURCE_URL:
+                image_path = create_hero_build_poster(
+                    cfg, "Аргус", selected_candidate.image_url, "Сборка #1 / комьюнити-статистика",
+                    "Marksman · 21/43", "War Cry · 27/43", "Inspire · 49%",
+                )
+            else:
+                image_path = create_editorial_card(
+                    cfg, category, image_title, selected_candidate.publisher,
+                    source_url=selected_candidate.url, image_url=selected_candidate.image_url,
+                )
             source_key = selected_candidate.url
 
         if image_path is None or not caption:
