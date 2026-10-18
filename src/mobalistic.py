@@ -428,10 +428,10 @@ def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publis
     artwork = article_image(image_url) if image_url else None
     if artwork is None and source_url:
         artwork = article_image(source_url)
-    if artwork is None:
+    if not isinstance(artwork, Image.Image):
         artwork = generate_ai_artwork(art_prompt(category, title, hero=hero))
-    if artwork is None:
-        log.info("Skipping editorial item: neither original publisher artwork nor AI artwork is available: %s", title)
+    if not isinstance(artwork, Image.Image):
+        log.info("Skipping editorial item: neither valid publisher artwork nor AI artwork is available: %s", title)
         return None
 
     scale = max(width / artwork.width, height / artwork.height)
