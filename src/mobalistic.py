@@ -884,12 +884,11 @@ def main() -> int:
     published = set(state.get("published", []))
     counts = state.get("category_counts", {})
 
-    if PUBLISH_ENABLED and (not BOT_TOKEN or not CHANNEL_ID or not GEMINI_KEY):
-        log.error("Publishing is enabled but required GitHub secrets are missing.")
+    if PUBLISH_ENABLED and (not BOT_TOKEN or not CHANNEL_ID):
+        log.error("Publishing is enabled but TELEGRAM_BOT_TOKEN or TELEGRAM_CHANNEL_ID is missing.")
         return 2
     if not GEMINI_KEY:
-        log.error("GEMINI_API_KEY is missing. Add it to GitHub Actions secrets before running the content engine.")
-        return 2
+        log.warning("GEMINI_API_KEY is missing. Builds can still publish; editorial posts use the safe fallback.")
 
     builds = [
         b for b in eligible_builds()
@@ -940,7 +939,7 @@ def main() -> int:
         if builds:
             choices.add("builds")
         choices.update(c.category for c in remaining if c.category in {"guides", "news", "esports", "hot_topic"})
-        category = select_category(cfg, choices, counts)
+        category = "builds" if builds else select_category(cfg, choices, counts)
         if category is None:
             break
 
