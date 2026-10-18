@@ -680,6 +680,21 @@ def telegram_send_photo(image_path: Path, caption: str) -> None:
         description = str(result.get("description", response.text))[:500]
         raise RuntimeError(f"Telegram sendPhoto failed (HTTP {response.status_code}): {description}")
 
+def telegram_send_message(caption: str) -> None:
+    """Publish a readable text-only Telegram post when no suitable artwork exists."""
+    if not BOT_TOKEN or not CHANNEL_ID:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID are required to publish")
+    endpoint = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    response = requests.post(endpoint, data={"chat_id": CHANNEL_ID, "text": caption[:4096], "parse_mode": "HTML", "disable_web_page_preview": "true"}, timeout=45)
+    try:
+        result = response.json()
+    except ValueError:
+        response.raise_for_status()
+        raise RuntimeError("Telegram sendMessage returned a non-JSON response")
+    if response.status_code >= 400 or not result.get("ok"):
+        description = str(result.get("description", response.text))[:500]
+        raise RuntimeError(f"Telegram sendMessage failed (HTTP {response.status_code}): {description})"
+
 def record_preview(image_path: Path, caption: str, category: str) -> None:
     preview_path = image_path.with_suffix(".txt")
     preview_path.write_text(
@@ -1005,6 +1020,32 @@ def main() -> int:
         else:
             record_preview(image_path, caption, category)
         posted += 1
+
+    if posted == 0 and PUBLISH_ENABLED:
+        # Safe, source-linked current-patch fallback if AI captions and artwork providers are unavailable.
+        fallback_key = "editorial:mlbb-patch-2.2.16a:2026-10-18"
+        if fallback_key not in published:
+            fallback_caption = (
+                "📰 <b>#MLBB — что важно в патче 2.2.16a</b>\n\n"
+                "В последнем балансном обновлении ослабили Aulus, Hirara, Eudora и Rafaela, "
+                "а Kalea получила усиление. Это не новый сезон и не новый герой — небольшая "
+                "балансная правка, поэтому перед рейтинговыми матчами стоит перепроверить привычные сборки.\n\n"
+                "🔎 <a href=\"https://mlbbhub.com/tier-list\">Источник и актуальная мета</a>\n\n"
+                "#MobileLegends #MLBB #Mobalistic"
+            )
+            try:
+                telegram_send_message(fallback_caption)
+            except Exception:
+                log.exception("Telegram fallback text publication failed")
+                return 3
+            published.add(fallback_key)
+            state["published"] = list(published)[-3000:]
+            state["last_post_at"] = datetime.now(timezone.utc).isoformat()
+            state["category_counts"] = counts
+            state["last_category"] = "news"
+            write_json(STATE_PATH, state)
+            log.info("Published fallback category=news source=%s", fallback_key)
+            posted += 1
 
     if posted == 0:
         log.info("No eligible new posts this run.")
