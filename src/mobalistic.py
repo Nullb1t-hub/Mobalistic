@@ -262,36 +262,57 @@ def art_prompt(category: str, title: str, hero: str = ""):
 def make_caption(item: Candidate) -> str | None:
     prompt = f"""
 Ты — редактор живого русскоязычного Telegram-канала для игроков Mobile Legends: Bang Bang.
-Пиши как игрок из комьюнити, не как пресс-релиз и не как нейросеть. Все имена героев пиши только официальным английским именем (Argus, Miya, Chou), никогда не транслитерируй и не переводи имя героя на русский. Если материал не о самой MLBB, нет конкретного факта, это SEO-перепечатка или данных недостаточно — ответь ровно SKIP.
-Не выдумывай факты, даты, цифры, патчи, сборки, результаты, цитаты или мнения.
-Строгий формат:
-<b>Короткий заголовок по сути</b>
-
-1–2 коротких абзаца, всего 2–4 предложения. Сразу факт и польза/последствие для игрока. Разговорный русский, естественный сленг только к месту (катка, пик, нерф, баф), максимум 1 эмодзи. Не повторяй заголовок, не пиши вступлений и пустого вопроса в конце.
-В конце: 🔗 <a href="{item.url}">Источник</a>
-HTML: только <b>, <i>, <a>. Максимум 450 символов с HTML.
-Рубрика: {CATEGORY_LABELS.get(item.category, "MLBB")}
+Пиши естественно и кратко. Официальные имена героев и предметов не переводи.
+Если новость не про MLBB, устарела, не содержит конкретного факта или данных недостаточно — ответь ровно SKIP.
+Никаких выдуманных дат, цифр, патчей, результатов и цитат.
+Верни только готовую подпись Telegram: короткий заголовок, 1–2 абзаца на русском (2–4 предложения), затем ссылку на источник.
+Без пресс-релизного языка, вступлений и пустого вопроса в конце. Максимум 450 символов без учёта HTML.
+HTML только <b>, <i>, <a>.
 Издатель: {item.publisher}
 Заголовок источника: {item.title}
-Описание: {item.summary[:900]}
+Описание источника: {item.summary[:1000]}
+Категория: {CATEGORY_LABELS.get(item.category, "MLBB")}
 Ссылка: {item.url}
 """
-    caption = gemini_text(prompt).strip()
-    if caption.upper() == "SKIP" or len(clean_html(caption)) < 65:
-        return None
-    plain = normalise(clean_html(caption))
-    low_signal = (
-        "в мире mobile legends", "стало известно", "игроки смогут",
-        "это событие подчеркивает", "данный шаг", "поклонники игры",
-        "следите за обновлениями", "что думаете об этом"
-    )
-    if any(phrase in plain for phrase in low_signal):
-        return None
-    if len(clean_html(caption)) > 450 or len(caption) > 1024:
-        return None
-    if item.url not in caption:
-        caption = caption.rstrip() + f'\n\n🔗 <a href="{html.escape(item.url, quote=True)}">Источник</a>'
-    return caption if len(caption) <= 1024 else None
+    try:
+        caption = gemini_text(prompt).strip()
+        if caption.upper() == "SKIP" or len(clean_html(caption)) < 45:
+            return None
+        plain = normalise(clean_html(caption))
+        low_signal = (
+            "в мире mobile legends", "стало известно", "игроки смогут",
+            "это событие подчеркивает", "данный шаг", "поклонники игры",
+            "следите за обновлениями", "что думаете об этом"
+        )
+        if any(phrase in plain for phrase in low_signal):
+            return None
+        if len(clean_html(caption)) > 450 or len(caption) > 1024:
+            return None
+        if item.url not in caption:
+            caption = caption.rstrip() + f'\n\n🔗 <a href="{html.escape(item.url, quote=True)}">Источник</a>'
+        return caption if len(caption) <= 1024 else None
+    except Exception as exc:
+        # Gemini quota should not silently stop the whole channel. Only use a deterministic
+        # Russian fallback when the source itself provides Russian text; never pass raw English
+        # RSS titles off as a translated summary.
+        log.warning("Gemini caption unavailable for %s (%s); checking safe Russian fallback.", item.url, type(exc).__name__)
+        source_text = clean_html(item.title + " " + item.summary)
+        cyrillic = len(re.findall(r"[А-Яа-яЁё]", source_text))
+        latin = len(re.findall(r"[A-Za-z]", source_text))
+        if cyrillic < 35 or cyrillic < latin * 0.35:
+            log.info("Skipping article because Russian source text is insufficient and Gemini is unavailable.")
+            return None
+        summary = clean_html(item.summary)
+        if len(summary) < 45:
+            return None
+        heading = html.escape(item.title[:100])
+        body = html.escape(summary[:260])
+        caption = (
+            f"<b>{heading}</b>\n\n{body}"
+            f'\n\n🔗 <a href="{html.escape(item.url, quote=True)}">Источник</a>'
+            "\n\n#MLBB #MobileLegends #Mobalistic"
+        )
+        return caption if len(caption) <= 1024 else None
 
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     options = [
@@ -398,59 +419,51 @@ def article_image(url: str) -> Image.Image | None:
         log.info("Article artwork unavailable; use branded fallback: %s", exc)
         return None
 
-def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publisher: str = "", source_url: str = "", image_url: str = "", hero: str = "") -> Path:
-    """Create an editorial image with real publisher artwork when available."""
+def create_editorial_card(cfg: dict[str, Any], category: str, title: str, publisher: str = "", source_url: str = "", image_url: str = "", hero: str = "") -> Path | None:
+    """Use authentic publisher artwork first; AI-generated key art is a fallback."""
     DRAFTS.mkdir(parents=True, exist_ok=True)
     width, height = 1080, 1350
     brand = cfg.get("brand", {})
     accent = brand.get("accent", "#A78BFA")
-    base = brand.get("background", "#0B0D16")
-    # Editorial art must be original AI artwork. Do not repost open-web/source images as a visual substitute.
-    artwork = generate_ai_artwork(art_prompt(category, title, hero=hero))
+    artwork = article_image(image_url) if image_url else None
+    if artwork is None and source_url:
+        artwork = article_image(source_url)
     if artwork is None:
-        log.info("Skipping editorial item: original AI artwork is unavailable; source images are intentionally not reused: %s", title)
+        artwork = generate_ai_artwork(art_prompt(category, title, hero=hero))
+    if artwork is None:
+        log.info("Skipping editorial item: neither original publisher artwork nor AI artwork is available: %s", title)
         return None
-    if artwork is not None:
-        scale = max(width / artwork.width, height / artwork.height)
-        artwork = artwork.resize((int(artwork.width * scale), int(artwork.height * scale)), Image.Resampling.LANCZOS)
-        left, top = (artwork.width - width) // 2, (artwork.height - height) // 2
-        image = artwork.crop((left, top, left + width, top + height)).filter(ImageFilter.GaussianBlur(1.5))
-        shade = Image.new("RGBA", (width, height), (5, 7, 16, 112))
-        image = Image.alpha_composite(image.convert("RGBA"), shade)
-    else:
-        image = Image.new("RGB", (width, height), base).convert("RGBA")
-        glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        gd = ImageDraw.Draw(glow)
-        gd.ellipse((-260, -250, 780, 780), fill=(167, 139, 250, 58))
-        gd.ellipse((520, 650, 1450, 1550), fill=(65, 95, 255, 28))
-        image = Image.alpha_composite(image, glow.filter(ImageFilter.GaussianBlur(110)))
-    draw = ImageDraw.Draw(image, "RGBA")
-    draw.rectangle((0, 0, width, 14), fill=accent)
-    draw.rounded_rectangle((54, 54, width - 54, height - 54), radius=30, outline=(255, 255, 255, 48), width=2)
-    draw.text((76, 74), "MOBALISTIC", font=font(28, True), fill=(255, 255, 255, 255))
-    draw.text((78, 116), CATEGORY_LABELS.get(category, "MLBB").upper(), font=font(18, True), fill=accent)
-    draw.line((76, 164, 270, 164), fill=accent, width=5)
+
+    scale = max(width / artwork.width, height / artwork.height)
+    artwork = artwork.resize((int(artwork.width * scale), int(artwork.height * scale)), Image.Resampling.LANCZOS)
+    left, top = (artwork.width - width) // 2, (artwork.height - height) // 2
+    image = artwork.crop((left, top, left + width, top + height)).convert("RGBA")
+    # Light darkening preserves the official screenshot/photo while keeping the headline readable.
+    shade = Image.new("RGBA", (width, height), (5, 7, 16, 68))
+    image = Image.alpha_composite(image, shade)
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     od = ImageDraw.Draw(overlay)
-    for y in range(480, 1190):
-        alpha = int(20 + 205 * ((y - 480) / 710))
+    for y in range(600, 1200):
+        alpha = int(0 + 155 * ((y - 600) / 600))
         od.line((0, y, width, y), fill=(5, 7, 16, alpha))
     image = Image.alpha_composite(image, overlay)
     draw = ImageDraw.Draw(image, "RGBA")
-    title_font = font(64, True)
-    lines = wrap_by_pixels(draw, title, title_font, 900)
-    if len(lines) > 5:
-        title_font = font(52, True)
-        lines = wrap_by_pixels(draw, title, title_font, 900)
-    y = min(800, max(430, 1110 - len(lines) * (title_font.size + 15)))
-    for line in lines[:6]:
-        draw.text((76, y), line, font=title_font, fill="#FFFFFF", stroke_width=1, stroke_fill=(0, 0, 0, 80))
-        y += title_font.size + 17
-    draw.text((78, 1175), (publisher or "MOBILE LEGENDS: BANG BANG")[:70], font=font(18, True), fill=(235, 235, 250, 225))
-    draw.text((78, 1220), "ИГРАЙ УМНЕЕ  /  MOBALISTIC", font=font(16, True), fill=accent)
+    draw.text((54, 54), "MOBALISTIC", font=font(27, True), fill=(255, 255, 255, 240))
+    draw.text((56, 96), CATEGORY_LABELS.get(category, "MLBB").upper(), font=font(17, True), fill=accent)
+    title_font = font(48, True)
+    lines = wrap_by_pixels(draw, title, title_font, 970)
+    if len(lines) > 4:
+        title_font = font(40, True)
+        lines = wrap_by_pixels(draw, title, title_font, 970)
+    y = max(790, 1130 - len(lines[:5]) * 58)
+    for line in lines[:5]:
+        draw.text((56, y), line, font=title_font, fill="#FFFFFF", stroke_width=1, stroke_fill=(0, 0, 0, 120))
+        y += title_font.size + 12
+    draw.text((56, 1270), (publisher or "MOBILE LEGENDS: BANG BANG")[:70], font=font(17, True), fill=(240, 240, 250, 220))
     out = DRAFTS / f"card-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')}.jpg"
-    image.convert("RGB").save(out, "JPEG", quality=91, optimize=True)
+    image.convert("RGB").save(out, "JPEG", quality=92, optimize=True)
     return out
+
 
 def source_text_value(value: Any) -> str:
     """Extract a human-readable label only from values explicitly present in the source API."""
