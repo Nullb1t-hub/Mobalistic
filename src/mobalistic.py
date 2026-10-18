@@ -693,7 +693,7 @@ def telegram_send_message(caption: str) -> None:
         raise RuntimeError("Telegram sendMessage returned a non-JSON response")
     if response.status_code >= 400 or not result.get("ok"):
         description = str(result.get("description", response.text))[:500]
-        raise RuntimeError(f"Telegram sendMessage failed (HTTP {response.status_code}): {description})"
+        raise RuntimeError(f"Telegram sendMessage failed (HTTP {response.status_code}): {description}")
 
 def record_preview(image_path: Path, caption: str, category: str) -> None:
     preview_path = image_path.with_suffix(".txt")
