@@ -16,7 +16,7 @@ from urllib.parse import quote, urlparse
 
 import feedparser
 import requests
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
@@ -539,16 +539,14 @@ def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None
             log.warning("Cannot load icon for %s: %s", item.get("name"), exc)
             return None
 
-    # Prefer the actual hero splash supplied by the build source. AI art is only a fallback,
-    # never a reason to replace the correct item order or use an unrelated web image.
+    # Accuracy-first: use only the real hero splash supplied by the verified build source.
+    # Never ask image AI to redraw a hero: it can produce the wrong character/skin.
     hero_art = None
     hero_url = str(build.get("hero_image_url", ""))
     if hero_url.startswith("https://"):
         hero_art = article_image(hero_url)
     if hero_art is None:
-        hero_art = generate_ai_artwork(art_prompt("builds", f"{build['hero']} hero", str(build["hero"])))
-    if hero_art is None:
-        log.warning("No usable hero splash or generated art for %s; skip rather than publish a broken card", build["hero"])
+        log.warning("Official hero splash unavailable for %s; skip instead of inventing artwork", build["hero"])
         return None
 
     width, height = 1080, 1350
@@ -574,28 +572,36 @@ def create_build_card(cfg: dict[str, Any], build: dict[str, Any]) -> Path | None
     draw.text((52, 108), f"СБОРКА · ПАТЧ {build['patch_version']}", font=font(22, True),
               fill=(235, 231, 255, 240), stroke_width=1, stroke_fill=(0, 0, 0, 120))
 
-    # Flat, borderless item strip: six icons in the exact source order.
+    # Reference-inspired design: dramatic real hero art and six real item icons.
     strip_y = hero_height
-    draw.rectangle((0, strip_y, width, height), fill=(10, 12, 20, 255))
-    margin = 34
+    draw.rectangle((0, strip_y, width, height), fill=(5, 17, 29, 255))
+    draw.rectangle((0, strip_y, width, strip_y + 5), fill=(45, 202, 245, 255))
+    margin = 24
     cell_w = (width - 2 * margin) // 6
     icon_size = 116
     for idx, (item, icon) in enumerate(zip(items, icons)):
-        x = margin + idx * cell_w + (cell_w - icon_size) // 2
-        y = strip_y + 40
-        icon.thumbnail((icon_size, icon_size), Image.Resampling.LANCZOS)
-        image.alpha_composite(icon, (x, y))
+        cx = margin + idx * cell_w + cell_w // 2
+        cy = strip_y + 84
+        icon = ImageOps.fit(icon.convert("RGBA"), (icon_size, icon_size), method=Image.Resampling.LANCZOS)
+        mask = Image.new("L", (icon_size, icon_size), 0)
+        ImageDraw.Draw(mask).ellipse((1, 1, icon_size - 2, icon_size - 2), fill=255)
+        icon.putalpha(mask)
+        ix, iy = cx - icon_size // 2, cy - icon_size // 2
+        draw.ellipse((ix - 4, iy - 4, ix + icon_size + 4, iy + icon_size + 4),
+                     fill=(14, 53, 75, 255), outline=(64, 211, 255, 210), width=3)
+        image.alpha_composite(icon, (ix, iy))
         draw = ImageDraw.Draw(image, "RGBA")
-        draw.text((margin + idx * cell_w + 4, strip_y + 19), str(idx + 1),
-                  font=font(18, True), fill=(180, 158, 255, 255))
-        item_font = font(15, True)
-        lines = wrap_by_pixels(draw, str(item["name"]), item_font, cell_w - 8)
-        text_y = strip_y + 170
+        draw.rounded_rectangle((cx - 16, strip_y + 12, cx + 16, strip_y + 42), radius=10,
+                               fill=(13, 107, 154, 255))
+        draw.text((cx - 6, strip_y + 16), str(idx + 1), font=font(18, True), fill="#FFFFFF")
+        item_font = font(14, True)
+        lines = wrap_by_pixels(draw, str(item["name"]), item_font, cell_w - 4)
+        text_y = strip_y + 153
         for line in lines[:3]:
             box = draw.textbbox((0, 0), line, font=item_font)
             draw.text((margin + idx * cell_w + (cell_w - (box[2] - box[0])) // 2, text_y),
-                      line, font=item_font, fill=(245, 245, 250, 255))
-            text_y += 20
+                      line, font=item_font, fill=(245, 250, 255, 255))
+            text_y += 19
 
     out = DRAFTS / f"build-{re.sub(r'[^a-zA-Z0-9_-]+', '-', str(build['hero']).lower())}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.jpg"
     image.convert("RGB").save(out, "JPEG", quality=94, optimize=True)
