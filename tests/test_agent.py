@@ -86,6 +86,7 @@ class MobalisticCoreTests(unittest.TestCase):
         self.assertIn("Патч ", caption)
         self.assertIn("порядок закупки", caption)
         self.assertLess(caption.index("1. Swift Boots"), caption.index("2. Corrosion Scythe"))
+        self.assertIn("5. Haas&#x27;s Claws", caption)
         self.assertLess(caption.index("5. Haas&#x27;s Claws"), caption.index("6. Malefic Roar"))
         self.assertNotIn("English source context", caption)
         self.assertIn("Как играть:", caption)
