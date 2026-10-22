@@ -872,7 +872,7 @@ def build_caption(build: dict[str, Any], build_number: int = 1) -> str:
         else:
             raw_role = "роль уточняй по пику и линии"
     role = html.escape(raw_role.lower())
-    item_lines = "\\n".join(f"{i}. {html.escape(str(item['name']))}" for i, item in enumerate(build["items"], 1))
+    item_lines = "\n".join(f"{i}. {html.escape(str(item['name']))}" for i, item in enumerate(build["items"], 1))
     spell = html.escape(str(build.get("battle_spell_names") or "смотри по ситуации"))
     emblem = html.escape(str(build.get("emblem_name") or "подбирай под героя"))
     tips = [
@@ -911,11 +911,11 @@ def build_caption(build: dict[str, Any], build_number: int = 1) -> str:
         "",
         "#MLBB #MobileLegends #Mobalistic",
     ]
-    caption = "\\n".join(lines)
+    caption = "\n".join(lines)
     if len(caption) > 1024:
         # Keep all six item names, role, spell and the gameplay sentence; trim only optional source label/hashtag.
         lines = [line for line in lines if line != "#MLBB #MobileLegends #Mobalistic"]
-        caption = "\\n".join(lines)
+        caption = "\n".join(lines)
     if len(caption) > 1024:
         raise ValueError("Build caption exceeds Telegram limit")
     return caption
