@@ -7,6 +7,7 @@ on:
       - 'src/**'
       - 'data/feeds.json'
       - 'data/hero_builds.json'
+      - 'data/published.json'
       - 'tests/**'
   workflow_dispatch:
   schedule:
