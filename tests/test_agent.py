@@ -83,12 +83,12 @@ class MobalisticCoreTests(unittest.TestCase):
             "battle_spell_names": "Flicker",
         }
         caption = agent.build_caption(build)
-        self.assertIn("Версия игры:", caption)
-        self.assertIn("Предметы по порядку", caption)
+        self.assertIn("Патч ", caption)
+        self.assertIn("порядок закупки", caption)
         self.assertLess(caption.index("1. Swift Boots"), caption.index("2. Corrosion Scythe"))
         self.assertLess(caption.index("5. Haas's Claws"), caption.index("6. Malefic Roar"))
         self.assertNotIn("English source context", caption)
-        self.assertIn("подстраивай предметы под состав соперника", caption)
+        self.assertIn("Как играть:", caption)
         self.assertLessEqual(len(caption), 1024)
 
     def test_build_discovery_runs_even_when_registry_has_unposted_builds(self):
@@ -112,12 +112,12 @@ class MobalisticCoreTests(unittest.TestCase):
             "battle_spell_names": "Flicker",
         }
         caption = agent.build_caption(build)
-        self.assertIn("Версия игры:", caption)
-        self.assertIn("Предметы по порядку", caption)
+        self.assertIn("Патч ", caption)
+        self.assertIn("порядок закупки", caption)
         self.assertLess(caption.index("1. Swift Boots"), caption.index("2. Corrosion Scythe"))
         self.assertLess(caption.index("5. Haas's Claws"), caption.index("6. Malefic Roar"))
         self.assertNotIn("This source context", caption)
-        self.assertIn("подстраивай предметы под состав соперника", caption)
+        self.assertIn("Как играть:", caption)
         self.assertLessEqual(len(caption), 1024)
 
     def test_build_discovery_runs_even_when_registry_has_unposted_builds(self):
