@@ -8,6 +8,7 @@ on:
       - 'data/feeds.json'
       - 'data/hero_builds.json'
       - 'data/published.json'
+      - '.github/workflows/publish.yml'
       - 'tests/**'
   workflow_dispatch:
   schedule:
