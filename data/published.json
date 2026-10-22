@@ -1,18 +1,20 @@
 {
   "published": [
-    "seed:argus-poster-v2",
-    "https://mlbb.io/tl/hero/argus/build",
+    "https://news.google.com/rss/articles/CBMigAFBVV95cUxNWlRuQjJBMnVDX1pLcjEwWGRRUUd2N21XeTlHUzdCZlZGeG9MSDAwNURxQlpuLVhqWnJYUGdLdVZKZTg0QXVoSlFIaXRGbS1xTE5tY3FfUUFmcUtzdkJ3bTNMVldxV1hoYl9uOGZ2X2JzSWJLblVMejdlWkw4SkFkcw?oc=5",
     "editorial:mlbb-patch-2.2.16a:2026-10-18",
-    "seed:argus-poster-v3",
-    "seed:layla-ai-art-test",
     "https://news.google.com/rss/articles/CBMijwFBVV95cUxPM25mSDNHd0huWjVrRFdVcThRWk1vOGpUTUZQTTl5M2VjdHdxUWYySHg5WGtPWWJrbDlVTWkxVXMxaEpJMXRBV2tsY0VFVV9KdmdDQkVmOVRjYVcxbGdFTVFSMFcyRGxlOUNjR0h1TkpXd25oMWJmTGVGcGFrSlpCUmNBbmh3YlpyZVI3bHljUQ?oc=5",
-    "https://news.google.com/rss/articles/CBMigAFBVV95cUxNWlRuQjJBMnVDX1pLcjEwWGRRUUd2N21XeTlHUzdCZlZGeG9MSDAwNURxQlpuLVhqWnJYUGdLdVZKZTg0QXVoSlFIaXRGbS1xTE5tY3FfUUFmcUtzdkJ3bTNMVldxV1hoYl9uOGZ2X2JzSWJLblVMejdlWkw4SkFkcw?oc=5"
+    "build:Argus:2.2.16a:EXP Attack-Effect Default",
+    "https://mlbb.io/tl/hero/argus/build",
+    "seed:argus-poster-v2",
+    "seed:layla-ai-art-test",
+    "seed:argus-poster-v3"
   ],
-  "last_category": "news",
+  "last_category": "builds",
   "category_counts": {
     "guides": 6,
-    "builds": 1
+    "builds": 2
   },
-  "last_post_at": "2026-10-18T13:37:22.787374+00:00",
-  "build_cursor": 118
+  "last_post_at": "2026-10-22T14:02:53.619657+00:00",
+  "build_cursor": 9,
+  "build_number": 1
 }
