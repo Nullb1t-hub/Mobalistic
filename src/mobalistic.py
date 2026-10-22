@@ -852,27 +852,70 @@ def eligible_builds() -> list[dict[str, Any]]:
         and build.get("verified_at")
     ]
 
-def build_caption(build: dict[str, Any]) -> str:
-    items = "\n".join(f"{i}. {item['name']}" for i, item in enumerate(build["items"], 1))
-    lines = [
-        f"⚔️ <b>{html.escape(str(build['hero']))} — сборка</b>",
-        f"Версия игры: <b>{html.escape(str(build['patch_version']))}</b>",
-        "",
-        "<b>Предметы по порядку</b>",
-        items,
+def build_caption(build: dict[str, Any], build_number: int = 1) -> str:
+    """Short, human-sounding build caption. Rotate voice and gameplay tip; never invent item data."""
+    hero = html.escape(str(build.get("hero", "Герой")))
+    patch = html.escape(str(build.get("patch_version", "актуальный")))
+    raw_role = str(build.get("role") or build.get("lane") or "").strip()
+    if not raw_role:
+        hint = normalise(str(build.get("source_build_name", "")))
+        if any(word in hint for word in ("assassin", "jungle", "jungler", "убийц")):
+            raw_role = "убийца"
+        elif any(word in hint for word in ("marksman", "gold lane", "стрел")):
+            raw_role = "стрелок"
+        elif any(word in hint for word in ("mage", "mid lane", "маг")):
+            raw_role = "маг"
+        elif any(word in hint for word in ("tank", "roam", "support", "танк", "поддерж")):
+            raw_role = "танк / поддержка"
+        elif any(word in hint for word in ("exp", "fighter", "боец")):
+            raw_role = "боец"
+        else:
+            raw_role = "роль уточняй по пику и линии"
+    role = html.escape(raw_role.lower())
+    item_lines = "\\n".join(f"{i}. {html.escape(str(item['name']))}" for i, item in enumerate(build["items"], 1))
+    spell = html.escape(str(build.get("battle_spell_names") or "смотри по ситуации"))
+    emblem = html.escape(str(build.get("emblem_name") or "подбирай под героя"))
+    tips = [
+        "Не влетай первым без кнопок: дождись замеса, залети на тонких и устрой им внеплановый отпуск.",
+        "Фарм сначала, геройство потом: собери ядро предметов и бей тех, кто решил гулять один.",
+        "Не жми все скиллы в воздух — поймай момент, зайди с фланга и не корми врагов бесплатно.",
+        "Если команда уже дерётся — помогай; если все разошлись по кустам, не начинай соло-турнир.",
+        "Играй от своей силы: забрал преимущество — дави цель, отстал — фарми и не раздавай камбэк.",
+        "Смотри на карту чаще, чем на красивый скин: одиночные цели сами просятся в таверну.",
     ]
-    if build.get("emblem_name"):
-        lines.extend(["", f"🧬 Эмблема: <b>{html.escape(str(build['emblem_name']))}</b>"])
-    if build.get("battle_spell_names"):
-        lines.append(f"⚡ Заклинание: <b>{html.escape(str(build['battle_spell_names']))}</b>")
-    lines.extend([
+    openers = [
+        f"⚔️ <b>#{html.escape(str(build_number))} · {hero} — сборка</b> ({role})",
+        f"🔥 <b>{hero} · билд №{html.escape(str(build_number))}</b> — роль: {role}",
+        f"🗡️ <b>Сборка #{html.escape(str(build_number))} на {hero}</b> · {role}",
+        f"💜 <b>{hero}: сборка №{html.escape(str(build_number))}</b> ({role})",
+    ]
+    intro = [
+        "Забирай порядок закупки — без магии и шаманства:",
+        "Покупки по порядку, чтобы не бегать по магазину как потерянный:",
+        "План закупки простой: бери вот так и не собирай винегрет:",
+        "Что покупать до полного набора — держи шпаргалку:",
+    ]
+    index = (build_number - 1) % len(tips)
+    lines = [
+        openers[(build_number - 1) % len(openers)],
+        f"<i>Патч {patch}</i>",
         "",
-        "Это рекомендация источника, а не универсальная сборка: подстраивай предметы под состав соперника.",
+        intro[(build_number - 1) % len(intro)],
+        item_lines,
+        "",
+        f"🧬 <b>Эмблема:</b> {emblem}",
+        f"⚡ <b>Боевой спелл:</b> {spell}",
+        "",
+        f"🎮 <b>Как играть:</b> {tips[index]}",
         f"🔎 <a href=\"{html.escape(str(build['source_url']), quote=True)}\">Источник сборки</a>",
         "",
         "#MLBB #MobileLegends #Mobalistic",
-    ])
-    caption = "\n".join(lines)
+    ]
+    caption = "\\n".join(lines)
+    if len(caption) > 1024:
+        # Keep all six item names, role, spell and the gameplay sentence; trim only optional source label/hashtag.
+        lines = [line for line in lines if line != "#MLBB #MobileLegends #Mobalistic"]
+        caption = "\\n".join(lines)
     if len(caption) > 1024:
         raise ValueError("Build caption exceeds Telegram limit")
     return caption
@@ -902,19 +945,16 @@ def main() -> int:
     if PUBLISH_ENABLED and (not BOT_TOKEN or not CHANNEL_ID):
         log.error("Publishing is enabled but TELEGRAM_BOT_TOKEN or TELEGRAM_CHANNEL_ID is missing.")
         return 2
-    if not GEMINI_KEY:
-        log.warning("GEMINI_API_KEY is missing. Builds can still publish; editorial posts use the safe fallback.")
 
     builds = [
         b for b in eligible_builds()
         if f"build:{b.get('hero')}:{b.get('patch_version')}:{b.get('source_build_name', 'Build')}" not in published
         and f"build:{b.get('hero')}:{b.get('patch_version')}" not in published
     ]
-    # The agent discovers source-backed builds on every run; the registry is only a fallback.
+    # Discover a fresh source-backed build every run; the local registry is only a fallback.
     cursor_before_discovery = state.get("build_cursor", 0)
     api_build = discover_one_source_build(state)
     if api_build is None and state.get("build_cursor", 0) != cursor_before_discovery:
-        # Persist rotation even when this scan has no build, so the next run checks new heroes.
         write_json(STATE_PATH, state)
     if api_build:
         builds = [api_build] + [
@@ -923,134 +963,59 @@ def main() -> int:
                f"build:{api_build.get('hero')}:{api_build.get('patch_version')}:{api_build.get('source_build_name', 'Build')}"
         ]
 
+    # Build-only mode: never publish news, esports, general guides, memes, or fallback filler.
     last_post_raw = str(state.get("last_post_at", "")).strip()
-    if PUBLISH_ENABLED and last_post_raw and not api_build and not builds:
+    if PUBLISH_ENABLED and last_post_raw:
         try:
             last_post_at = datetime.fromisoformat(last_post_raw.replace("Z", "+00:00"))
             if last_post_at.tzinfo is None:
                 last_post_at = last_post_at.replace(tzinfo=timezone.utc)
             wait_left = MIN_POST_INTERVAL - (datetime.now(timezone.utc) - last_post_at.astimezone(timezone.utc))
             if wait_left.total_seconds() > 0:
-                log.info("Cooldown active; next publication allowed in about %s minutes.", int(wait_left.total_seconds() // 60))
+                log.info("Build-only cooldown active; next post allowed in about %s minutes.", int(wait_left.total_seconds() // 60))
                 return 0
         except ValueError:
             log.warning("Invalid last_post_at in state; cooldown cannot be evaluated.")
 
-    candidates = collect_candidates(cfg, published)
-    available: set[str] = set()
-    if builds:
-        available.add("builds")
-    for candidate in candidates:
-        if candidate.category in {"guides", "news", "esports", "hot_topic"}:
-            available.add(candidate.category)
-    if not candidates and not builds:
-        log.info("No eligible news or verified build found; skip this run.")
-    
-    posted = 0
-    used_urls: set[str] = set()
-    while posted < 1:  # One post maximum per run.
-        remaining = [c for c in candidates if c.url not in used_urls]
-        choices: set[str] = set()
-        if builds:
-            choices.add("builds")
-        choices.update(c.category for c in remaining if c.category in {"guides", "news", "esports", "hot_topic"})
-        category = "builds" if builds else select_category(cfg, choices, counts)
-        if category is None:
-            break
+    selected = next((
+        b for b in builds
+        if f"build:{b.get('hero')}:{b.get('patch_version')}:{b.get('source_build_name', 'Build')}" not in published
+        and f"build:{b.get('hero')}:{b.get('patch_version')}" not in published
+    ), None)
+    if selected is None:
+        log.info("No new verified hero build found; skipping run. Build-only mode is enabled.")
+        return 0
 
-        image_path: Path | None = None
-        caption = ""
-        source_key = ""
-        if category == "builds":
-            selected = next((
-                b for b in builds
-                if f"build:{b['hero']}:{b['patch_version']}:{b.get('source_build_name', 'Build')}" not in published
-                and f"build:{b['hero']}:{b['patch_version']}" not in published
-            ), None)
-            if selected is None:
-                builds = []
-                continue
-            image_path = create_build_card(cfg, selected)
-            if image_path is None:
-                builds = [b for b in builds if b is not selected]
-                continue
-            caption = build_caption(selected)
-            source_key = f"build:{selected['hero']}:{selected['patch_version']}:{selected.get('source_build_name', 'Build')}"
-            builds = [b for b in builds if b is not selected]
-        else:
-            selected_candidate = next((c for c in remaining if c.category == category), None)
-            if selected_candidate is None:
-                continue
-            try:
-                caption = make_caption(selected_candidate)
-            except Exception as exc:
-                log.warning("AI caption generation failed; skip source %s: %s", selected_candidate.url, exc)
-                used_urls.add(selected_candidate.url)
-                continue
-            used_urls.add(selected_candidate.url)
-            if not caption:
-                continue
-            image_title = re.sub(r"<[^>]+>", "", caption.splitlines()[0]).strip()[:110]
-            image_title = html.unescape(image_title) or selected_candidate.title
-            image_path = create_editorial_card(
-                cfg, category, image_title, selected_candidate.publisher,
-                source_url=selected_candidate.url, image_url=selected_candidate.image_url,
-            )
-            source_key = selected_candidate.url
+    image_path = create_build_card(cfg, selected)
+    if image_path is None:
+        log.warning("Build card could not be created for %s; skipping instead of posting non-build content.", selected.get("hero"))
+        return 0
 
-        if image_path is None or not caption:
-            continue
-        if PUBLISH_ENABLED:
-            try:
-                # One Telegram message: image plus readable caption, never two separate posts.
-                telegram_send_photo(image_path, caption)
-            except Exception:
-                log.exception("Telegram publication failed; state was not advanced")
-                return 3
-            published.add(source_key)
-            state["last_post_at"] = datetime.now(timezone.utc).isoformat()
-            if category == "builds" and selected.get("verification_method"):
-                state["build_cursor"] = int(state.get("build_cursor", 0)) + 1
-            state["published"] = list(published)[-3000:]
-            counts[category] = int(counts.get(category, 0)) + 1
-            state["category_counts"] = counts
-            state["last_category"] = category
-            write_json(STATE_PATH, state)
-            log.info("Published category=%s source=%s", category, source_key)
-        else:
-            record_preview(image_path, caption, category)
-        posted += 1
+    build_number = max(1, int(state.get("build_number", 0)) + 1)
+    caption = build_caption(selected, build_number)
+    source_key = f"build:{selected['hero']}:{selected['patch_version']}:{selected.get('source_build_name', 'Build')}"
 
-    if posted == 0 and PUBLISH_ENABLED:
-        # Safe, source-linked current-patch fallback if AI captions and artwork providers are unavailable.
-        fallback_key = "editorial:mlbb-patch-2.2.16a:2026-10-18"
-        if fallback_key not in published:
-            fallback_caption = (
-                "📰 <b>#MLBB — что важно в патче 2.2.16a</b>\n\n"
-                "В последнем балансном обновлении ослабили Aulus, Hirara, Eudora и Rafaela, "
-                "а Kalea получила усиление. Это не новый сезон и не новый герой — небольшая "
-                "балансная правка, поэтому перед рейтинговыми матчами стоит перепроверить привычные сборки.\n\n"
-                "🔎 <a href=\"https://mlbbhub.com/tier-list\">Источник и актуальная мета</a>\n\n"
-                "#MobileLegends #MLBB #Mobalistic"
-            )
-            try:
-                telegram_send_message(fallback_caption)
-            except Exception:
-                log.exception("Telegram fallback text publication failed")
-                return 3
-            published.add(fallback_key)
-            state["published"] = list(published)[-3000:]
-            state["last_post_at"] = datetime.now(timezone.utc).isoformat()
-            state["category_counts"] = counts
-            state["last_category"] = "news"
-            write_json(STATE_PATH, state)
-            log.info("Published fallback category=news source=%s", fallback_key)
-            posted += 1
-
-    if posted == 0:
-        log.info("No eligible new posts this run.")
+    if PUBLISH_ENABLED:
+        try:
+            telegram_send_photo(image_path, caption)
+        except Exception:
+            log.exception("Telegram build publication failed; state was not advanced")
+            return 3
+        published.add(source_key)
+        state["last_post_at"] = datetime.now(timezone.utc).isoformat()
+        state["build_number"] = build_number
+        if selected.get("verification_method"):
+            state["build_cursor"] = int(state.get("build_cursor", 0)) + 1
+        state["published"] = list(published)[-3000:]
+        counts["builds"] = int(counts.get("builds", 0)) + 1
+        state["category_counts"] = counts
+        state["last_category"] = "builds"
+        write_json(STATE_PATH, state)
+        log.info("Published build #%s hero=%s source=%s", build_number, selected.get("hero"), source_key)
     else:
-        log.info("Run finished. %s post(s) %s.", posted, "published" if PUBLISH_ENABLED else "prepared for preview")
+        record_preview(image_path, caption, "builds")
+        log.info("Build #%s prepared for preview; publishing is disabled.", build_number)
+
     return 0
 
 if __name__ == "__main__":
